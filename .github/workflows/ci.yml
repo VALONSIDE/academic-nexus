@@ -1,0 +1,51 @@
+name: CI / 持续集成
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend / 后端
+    runs-on: ubuntu-22.04
+    env:
+      PYTHONPATH: backend
+      JWT_SECRET_KEY: ci-not-a-production-secret-please-replace
+      ACCESS_KEY_PEPPER: ci-access-key-pepper-not-a-production-secret
+      INITIAL_ADMIN_EMAIL: admin@example.test
+      INITIAL_ADMIN_PASSWORD: AcademicNexusCI2026
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r backend/requirements.txt
+      - run: python -m compileall -q backend
+      - run: python -m pytest backend/tests -q
+
+  frontend:
+    name: Frontend / 前端
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:run
+
+  compose:
+    name: Docker Compose configuration / Docker 编排校验
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose config --quiet
