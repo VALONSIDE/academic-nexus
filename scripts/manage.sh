@@ -103,6 +103,7 @@ generate_secret() {
 }
 
 install_docker_gpg_key() {
+  local repository_url="$1"
   local temporary_key
   temporary_key="$(mktemp)"
 
@@ -112,10 +113,10 @@ install_docker_gpg_key() {
   if ! curl --fail --show-error --silent --location \
     --retry 5 --retry-delay 2 --retry-all-errors \
     --connect-timeout 15 --max-time 90 \
-    https://download.docker.com/linux/debian/gpg \
+    "$repository_url/gpg" \
     --output "$temporary_key"; then
     rm -f -- "$temporary_key"
-    die "Unable to download Docker's GPG key from download.docker.com. Check outbound HTTPS/DNS access, then retry './scripts/manage.sh install'."
+    die "Unable to download Docker's GPG key from $repository_url. Check outbound network access or set DOCKER_APT_REPOSITORY to a trusted mirror, then retry."
   fi
 
   if ! "${SUDO[@]}" gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg "$temporary_key"; then
@@ -133,6 +134,10 @@ install_docker() {
   [[ "${ID:-}" == "debian" ]] || die "This installer supports Debian only. Detected: ${PRETTY_NAME:-unknown}."
 
   local SUDO=()
+  local docker_repository
+  docker_repository="${DOCKER_APT_REPOSITORY:-https://download.docker.com/linux/debian}"
+  docker_repository="${docker_repository%/}"
+  [[ "$docker_repository" =~ ^https?://[^[:space:]]+$ ]] || die "DOCKER_APT_REPOSITORY must be an http(s) repository URL without spaces."
   if ((EUID != 0)); then
     command -v sudo >/dev/null 2>&1 || die "Run as root or install sudo first."
     SUDO=(sudo)
@@ -141,13 +146,14 @@ install_docker() {
   if command -v docker >/dev/null 2>&1 && "${SUDO[@]}" docker compose version >/dev/null 2>&1; then
     success "Docker Engine and Docker Compose are already available."
   else
-    info "Installing Docker Engine, Buildx and the Compose plugin from Docker's Debian repository..."
+    info "Installing Docker Engine, Buildx and the Compose plugin..."
+    info "Docker APT repository: $docker_repository"
     "${SUDO[@]}" apt-get update
     "${SUDO[@]}" apt-get install -y ca-certificates curl gnupg openssl
     "${SUDO[@]}" install -m 0755 -d /etc/apt/keyrings
-    install_docker_gpg_key
-    printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian %s stable\n' \
-      "$(dpkg --print-architecture)" "${VERSION_CODENAME}" | "${SUDO[@]}" tee /etc/apt/sources.list.d/docker.list >/dev/null
+    install_docker_gpg_key "$docker_repository"
+    printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.gpg] %s %s stable\n' \
+      "$(dpkg --print-architecture)" "$docker_repository" "${VERSION_CODENAME}" | "${SUDO[@]}" tee /etc/apt/sources.list.d/docker.list >/dev/null
     "${SUDO[@]}" apt-get update
     "${SUDO[@]}" apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     "${SUDO[@]}" systemctl enable --now docker

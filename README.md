@@ -222,6 +222,17 @@ chmod +x scripts/manage.sh
 http://<服务器 IP>:<初始化时选择的端口>
 ```
 
+### 中国大陆网络下的 Docker 软件源备用配置
+
+若服务器无法连接 `download.docker.com`，但运行在阿里云 ECS VPC 网络中，可在安装时临时改用阿里云 Docker CE 镜像；软件包仍会由 Docker GPG Key 验签：
+
+```bash
+DOCKER_APT_REPOSITORY=http://mirrors.cloud.aliyuncs.com/docker-ce/linux/debian \
+  ./scripts/manage.sh install
+```
+
+该变量只影响 Docker 安装软件源，不会写入项目 `.env`。阿里云镜像站当前提供 Debian `trixie` 的 Docker CE 索引；优先使用官方源，只有官方 CDN 网络不可达时才使用此备用方式。
+
 ### 日常运维命令
 
 | 命令 | 作用 |
@@ -404,6 +415,13 @@ chmod +x scripts/manage.sh
 ```
 
 `init` asks for the public Alpha port, initial administrator account/password, and an optional MiniMax key. It creates a mode-`600` `.env`, generates independent PostgreSQL/JWT/Access-Key secrets, builds the stack, runs it, and never prints those secrets.
+
+If Docker's official repository is unreachable from an Alibaba Cloud ECS VPC, use the temporary trusted mirror override below. Package metadata remains verified by Docker's GPG key:
+
+```bash
+DOCKER_APT_REPOSITORY=http://mirrors.cloud.aliyuncs.com/docker-ce/linux/debian \
+  ./scripts/manage.sh install
+```
 
 | Command | Result |
 | --- | --- |
