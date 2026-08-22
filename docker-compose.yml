@@ -2,7 +2,7 @@ name: ${COMPOSE_PROJECT_NAME:-academicnexus}
 
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg16}
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -32,6 +32,8 @@ services:
     build:
       context: ./backend
       target: development
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.13-slim}
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -60,6 +62,8 @@ services:
     build:
       context: ./frontend
       target: development
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:22-alpine}
     environment:
       VITE_DEV_API_PROXY_TARGET: http://api:8000
     volumes:
@@ -73,7 +77,7 @@ services:
       - "5173"
 
   nginx:
-    image: nginx:1.27-alpine
+    image: ${NGINX_IMAGE:-nginx:1.27-alpine}
     depends_on:
       api:
         condition: service_healthy

@@ -1,4 +1,5 @@
-FROM node:22-alpine AS base
+ARG NODE_BASE_IMAGE=node:22-alpine
+FROM ${NODE_BASE_IMAGE} AS base
 
 WORKDIR /app
 COPY package*.json ./

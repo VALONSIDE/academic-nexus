@@ -233,6 +233,35 @@ DOCKER_APT_REPOSITORY=http://mirrors.cloud.aliyuncs.com/docker-ce/linux/debian \
 
 该变量只影响 Docker 安装软件源，不会写入项目 `.env`。阿里云镜像站当前提供 Debian `trixie` 的 Docker CE 索引；优先使用官方源，只有官方 CDN 网络不可达时才使用此备用方式。
 
+### Docker Hub 无法拉取时的 ACR 私有镜像方案
+
+ACR 个人镜像加速器可能没有同步所需的固定标签；此时不要依赖不明第三方镜像站。推荐在同地域 ACR 企业版实例中使用“制品订阅”同步以下 Docker Hub 镜像，并在订阅完成后填写私有仓库地址：
+
+| Docker Hub 源镜像 | 项目变量 |
+| --- | --- |
+| `pgvector/pgvector:pg16` | `POSTGRES_IMAGE` |
+| `redis:7.4-alpine` | `REDIS_IMAGE` |
+| `nginx:1.27-alpine` | `NGINX_IMAGE` |
+| `python:3.13-slim` | `PYTHON_BASE_IMAGE` |
+| `node:22-alpine` | `NODE_BASE_IMAGE` |
+
+例如，若所有镜像已同步到 ACR，先登录你的 ACR 域名，再在私有 `.env` 中填写实际仓库路径：
+
+```bash
+docker login <你的 ACR 域名>
+nano .env
+```
+
+```dotenv
+POSTGRES_IMAGE=<你的 ACR 域名>/academicnexus/pgvector:pg16
+REDIS_IMAGE=<你的 ACR 域名>/academicnexus/redis:7.4-alpine
+NGINX_IMAGE=<你的 ACR 域名>/academicnexus/nginx:1.27-alpine
+PYTHON_BASE_IMAGE=<你的 ACR 域名>/academicnexus/python:3.13-slim
+NODE_BASE_IMAGE=<你的 ACR 域名>/academicnexus/node:22-alpine
+```
+
+随后执行 `./scripts/manage.sh start`。这些变量均有 Docker Hub 默认值，因此在网络正常的开发环境无需设置。
+
 ### 日常运维命令
 
 | 命令 | 作用 |
