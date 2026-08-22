@@ -102,6 +102,30 @@ generate_secret() {
   openssl rand -base64 "$byte_count" | tr '+/' '-_' | tr -d '=\n'
 }
 
+install_docker_gpg_key() {
+  local temporary_key
+  temporary_key="$(mktemp)"
+
+  # Avoid piping a partial network response into gpg.  Some cloud networks reset
+  # the Docker CDN connection transiently; retry safely and keep the old key
+  # untouched until a complete response has been downloaded.
+  if ! curl --fail --show-error --silent --location \
+    --retry 5 --retry-delay 2 --retry-all-errors \
+    --connect-timeout 15 --max-time 90 \
+    https://download.docker.com/linux/debian/gpg \
+    --output "$temporary_key"; then
+    rm -f -- "$temporary_key"
+    die "Unable to download Docker's GPG key from download.docker.com. Check outbound HTTPS/DNS access, then retry './scripts/manage.sh install'."
+  fi
+
+  if ! "${SUDO[@]}" gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg "$temporary_key"; then
+    rm -f -- "$temporary_key"
+    die "Docker's downloaded GPG key could not be validated. The repository was not added."
+  fi
+  rm -f -- "$temporary_key"
+  "${SUDO[@]}" chmod a+r /etc/apt/keyrings/docker.gpg
+}
+
 install_docker() {
   [[ -r /etc/os-release ]] || die "This installer supports Debian only."
   # shellcheck disable=SC1091
@@ -121,8 +145,7 @@ install_docker() {
     "${SUDO[@]}" apt-get update
     "${SUDO[@]}" apt-get install -y ca-certificates curl gnupg openssl
     "${SUDO[@]}" install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg | "${SUDO[@]}" gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
-    "${SUDO[@]}" chmod a+r /etc/apt/keyrings/docker.gpg
+    install_docker_gpg_key
     printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian %s stable\n' \
       "$(dpkg --print-architecture)" "${VERSION_CODENAME}" | "${SUDO[@]}" tee /etc/apt/sources.list.d/docker.list >/dev/null
     "${SUDO[@]}" apt-get update
