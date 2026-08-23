@@ -97,7 +97,7 @@ async function deleteAccounts(ids: string[]) {
   if (!auth.state.token || !ids.length) return
   const firstId = ids[0]
   if (!firstId) return
-  const prompt = locale.value === 'zh-CN' ? `确认删除 ${ids.length} 个未激活预注册账户？此操作不可恢复。` : `Delete ${ids.length} unactivated pre-registration account(s)? This cannot be undone.`
+  const prompt = t('deletePreRegistrationConfirmation', { count: ids.length })
   if (!window.confirm(prompt)) return
   busy.value = true; error.value = ''
   try {

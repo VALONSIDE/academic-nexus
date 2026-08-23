@@ -55,6 +55,8 @@ def test_account_cannot_log_in_until_academic_portrait_is_completed() -> None:
                 academic_id="20240001",
                 access_key="1234-ABCD-5678-9012",
                 password="AcademicNexus2026",
+                terms_accepted=True,
+                privacy_accepted=True,
             ),
             db,
         )

@@ -43,7 +43,7 @@ def serialize_user(user: User) -> UserResponse:
 def authenticate_response(user: User) -> AuthResponse:
     roles = sorted(role.code for role in user.roles)
     return AuthResponse(
-        access_token=create_access_token(subject=str(user.id), roles=roles),
+        access_token=create_access_token(subject=str(user.id), roles=roles, auth_version=user.auth_version),
         user=serialize_user(user),
     )
 
@@ -109,6 +109,9 @@ def start_activation(payload: ActivationRequest, db: DbSession) -> ActivationSta
             preferred_locale=payload.preferred_locale,
             is_active=False,
             is_verified=False,
+            terms_accepted_at=datetime.now(timezone.utc),
+            privacy_accepted_at=datetime.now(timezone.utc),
+            legal_document_version="2026-08-23-v1.0",
         )
         user.roles.append(role)
         db.add(user)
@@ -117,6 +120,9 @@ def start_activation(payload: ActivationRequest, db: DbSession) -> ActivationSta
         # Restarting the incomplete process requires all receipt fields and the key again.
         user.password_hash = hash_password(payload.password)
         user.preferred_locale = payload.preferred_locale
+        user.terms_accepted_at = datetime.now(timezone.utc)
+        user.privacy_accepted_at = datetime.now(timezone.utc)
+        user.legal_document_version = "2026-08-23-v1.0"
 
     if pre_registration.role_code == "student":
         profile = user.student_profile or db.scalar(select(StudentProfile).where(StudentProfile.user_id == user.id))
@@ -156,7 +162,10 @@ def start_activation(payload: ActivationRequest, db: DbSession) -> ActivationSta
     db.commit()
     return ActivationStartResponse(
         registration_token=create_access_token(
-            subject=str(user.id), roles=[pre_registration.role_code], scope="profile_completion"
+            subject=str(user.id),
+            roles=[pre_registration.role_code],
+            auth_version=user.auth_version,
+            scope="profile_completion",
         ),
         role=pre_registration.role_code,
     )
@@ -195,9 +204,12 @@ def update_locale(payload: LocaleUpdateRequest, current_user: CurrentUser, db: D
     return serialize_user(current_user)
 
 
-@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT, summary="Change own password / 修改自己的密码")
-def change_own_password(payload: PasswordChangeRequest, current_user: CurrentUser, db: DbSession) -> None:
+@router.post("/me/password", response_model=AuthResponse, summary="Change own password / 修改自己的密码")
+def change_own_password(payload: PasswordChangeRequest, current_user: CurrentUser, db: DbSession) -> AuthResponse:
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "current_password_incorrect"})
     current_user.password_hash = hash_password(payload.new_password)
+    current_user.auth_version += 1
     db.commit()
+    db.refresh(current_user)
+    return authenticate_response(current_user)

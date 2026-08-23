@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DbSession, require_roles
+from app.api.deps import DbSession, require_administrator
 from app.api.v1.endpoints.auth import serialize_user
 from app.api.v1.endpoints.profiles import (
     _mentor_data,
@@ -14,7 +14,8 @@ from app.api.v1.endpoints.profiles import (
     apply_student_profile,
 )
 from app.core.security import hash_password
-from app.models.user import User
+from app.models.user import MentorProfile, StudentProfile, User
+from app.services.admin_scope import can_manage_user, institution_admin_abbrs, is_super_admin
 from app.schemas.profiles import (
     AdminUserBatchUpdateRequest,
     AdminUserBatchUpdateResponse,
@@ -73,7 +74,7 @@ def _load_managed_user(db: DbSession, admin: User, user_id: UUID) -> User:
         .options(selectinload(User.roles), selectinload(User.student_profile), selectinload(User.mentor_profile))
         .where(User.id == user_id, User.tenant_id == admin.tenant_id)
     )
-    if user is None or _managed_role(user) is None:
+    if user is None or _managed_role(user) is None or not can_manage_user(db, admin, user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found / 未找到用户")
     return user
 
@@ -81,7 +82,7 @@ def _load_managed_user(db: DbSession, admin: User, user_id: UUID) -> User:
 @router.get("", response_model=ManagedUserListResponse, summary="List students or mentors / 查询学生或导师")
 def list_managed_users(
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_administrator),
     role: ManagedRole = Query(...),
     search: str = Query(default="", max_length=100),
 ) -> ManagedUserListResponse:
@@ -93,6 +94,12 @@ def list_managed_users(
         .where(User.roles.any(code=role))
         .order_by(User.created_at.desc())
     )
+    if not is_super_admin(admin):
+        scopes = institution_admin_abbrs(db, admin)
+        if role == "student":
+            statement = statement.where(User.student_profile.has(StudentProfile.institution_abbr.in_(scopes)))
+        else:
+            statement = statement.where(User.mentor_profile.has(MentorProfile.institution_abbr.in_(scopes)))
     normalized_search = search.strip()
     if normalized_search:
         pattern = f"%{normalized_search}%"
@@ -107,7 +114,7 @@ def update_managed_user(
     user_id: UUID,
     payload: AdminUserUpdateRequest,
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_administrator),
 ) -> ManagedUserResponse:
     user = _load_managed_user(db, admin, user_id)
     role = _managed_role(user)
@@ -118,6 +125,8 @@ def update_managed_user(
     if payload.preferred_locale is not None:
         user.preferred_locale = payload.preferred_locale
     if payload.is_active is not None:
+        if user.is_active and not payload.is_active:
+            user.auth_version += 1
         user.is_active = payload.is_active
     if payload.student_profile is not None:
         if role != "student" or user.student_profile is None:
@@ -136,19 +145,21 @@ def update_managed_user(
 def batch_update_user_status(
     payload: AdminUserBatchUpdateRequest,
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_administrator),
 ) -> AdminUserBatchUpdateResponse:
     user_ids = list(set(payload.user_ids))
     users = db.scalars(
         select(User)
-        .options(selectinload(User.roles))
+        .options(selectinload(User.roles), selectinload(User.student_profile), selectinload(User.mentor_profile))
         .where(User.id.in_(user_ids), User.tenant_id == admin.tenant_id)
         .with_for_update()
     ).all()
-    managed = [user for user in users if _managed_role(user) is not None]
+    managed = [user for user in users if _managed_role(user) is not None and can_manage_user(db, admin, user)]
     if len(managed) != len(user_ids):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "user_not_found"})
     for user in managed:
+        if user.is_active and not payload.is_active:
+            user.auth_version += 1
         user.is_active = payload.is_active
     db.commit()
     return AdminUserBatchUpdateResponse(updated=len(managed))
@@ -159,8 +170,9 @@ def reset_managed_user_password(
     user_id: UUID,
     payload: AdminPasswordResetRequest,
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_administrator),
 ) -> None:
     user = _load_managed_user(db, admin, user_id)
     user.password_hash = hash_password(payload.new_password)
+    user.auth_version += 1
     db.commit()

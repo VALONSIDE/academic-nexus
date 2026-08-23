@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -30,7 +30,10 @@ class UserRole(Base):
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),
+        UniqueConstraint("username", name="uq_users_username_global"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), index=True)
@@ -38,10 +41,14 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     full_name: Mapped[str] = mapped_column(String(120))
     password_hash: Mapped[str] = mapped_column(String(255))
+    auth_version: Mapped[int] = mapped_column(Integer, default=0)
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     preferred_locale: Mapped[str] = mapped_column(String(10), default="zh-CN")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    privacy_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    legal_document_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pre_registration_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("pre_registrations.id", ondelete="RESTRICT"), unique=True, nullable=True

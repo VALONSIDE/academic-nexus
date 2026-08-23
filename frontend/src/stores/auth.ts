@@ -102,6 +102,13 @@ export function useAuthStore() {
     window.localStorage.setItem(userKey, JSON.stringify(state.user))
   }
 
+  async function changePassword(currentPassword: string, newPassword: string) {
+    if (!state.token) throw new Error('Authentication required')
+    const result = await authApi.changeOwnPassword(state.token, currentPassword, newPassword)
+    persist(result)
+    return result.user
+  }
+
   function logout() {
     state.token = null
     state.user = null
@@ -111,5 +118,5 @@ export function useAuthStore() {
     window.sessionStorage.removeItem(registrationKey)
   }
 
-  return { state, registration, isAuthenticated, login, startActivation, completeRegistration, refreshUser, setLocale, logout }
+  return { state, registration, isAuthenticated, login, startActivation, completeRegistration, refreshUser, setLocale, changePassword, logout }
 }

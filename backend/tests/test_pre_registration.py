@@ -1,4 +1,6 @@
 from io import BytesIO
+import uuid
+from zipfile import ZipFile
 
 import pytest
 from fastapi import HTTPException
@@ -13,7 +15,7 @@ from app.models.pre_registration import PreRegistration, PreRegistrationBatch
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.services.access_keys import access_key_fingerprint, is_valid_access_key_format
-from app.services.pre_registration_import import TEMPLATE_HEADERS, TEMPLATE_SHEET, PreRegistrationImportError, build_import_template, build_receipt_workbook, import_pre_registrations, parse_import_workbook
+from app.services.pre_registration_import import TEMPLATE_HEADERS, TEMPLATE_SHEET, PreRegistrationImportError, ReceiptRow, build_import_template, build_receipt_workbook, import_pre_registrations, parse_import_workbook
 from app.api.v1.endpoints.pre_registrations import _delete_issued_items
 
 
@@ -46,6 +48,15 @@ def test_partner_import_generates_unique_bound_access_keys_and_identity() -> Non
         assert sheet.max_row == 3 and sheet["F2"].value == receipt[0].access_key
 
 
+def test_account_receipt_neutralizes_spreadsheet_formula_prefixes() -> None:
+    receipt = build_receipt_workbook([
+        ReceiptRow("CUC_S100", "=HYPERLINK(\"https://example.invalid\")", "University", "College", "20240001", "1234-ABCD-1234-5678")
+    ], batch_id=uuid.uuid4())
+    sheet = load_workbook(BytesIO(receipt), data_only=False)["账户回执 Account Receipt"]
+    assert sheet["B2"].value == "'=HYPERLINK(\"https://example.invalid\")"
+    assert sheet["B2"].data_type == "s"
+
+
 def test_import_rejects_missing_identity_or_duplicate_username() -> None:
     missing_college = make_workbook([("CUC", "中国传媒大学", "", "student", "张同学", "20240001")])
     with pytest.raises(PreRegistrationImportError, match="College Name"):
@@ -53,6 +64,32 @@ def test_import_rejects_missing_identity_or_duplicate_username() -> None:
     duplicate = make_workbook([("CUC", "中国传媒大学", "新闻学院", "student", "张同学", "20240001"), ("CUC", "中国传媒大学", "新闻学院", "S", "王同学", "20240001")])
     with pytest.raises(PreRegistrationImportError, match="duplicate username"):
         parse_import_workbook(duplicate)
+
+
+def test_import_rejects_a_username_already_issued_by_another_tenant() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:"); Base.metadata.create_all(engine)
+    content = make_workbook([("CUC", "中国传媒大学", "新闻学院", "student", "张同学", "20240001")])
+    with Session(engine) as db:
+        first = Tenant(slug="first-tenant", name="First Tenant")
+        second = Tenant(slug="second-tenant", name="Second Tenant")
+        db.add_all([first, second]); db.flush()
+        first_admin = User(tenant_id=first.id, username="FIRST_ADMIN", full_name="First Admin", password_hash="hash")
+        second_admin = User(tenant_id=second.id, username="SECOND_ADMIN", full_name="Second Admin", password_hash="hash")
+        db.add_all([first_admin, second_admin]); db.flush()
+        import_pre_registrations(db, tenant_id=first.id, admin_user_id=first_admin.id, source_filename="first.xlsx", content=content)
+
+        with pytest.raises(PreRegistrationImportError, match="Username already exists"):
+            import_pre_registrations(db, tenant_id=second.id, admin_user_id=second_admin.id, source_filename="second.xlsx", content=content)
+
+
+def test_import_rejects_an_excel_archive_with_excessive_entries() -> None:
+    archive = BytesIO()
+    with ZipFile(archive, "w") as workbook:
+        for index in range(1001):
+            workbook.writestr(f"entry-{index}.xml", "")
+
+    with pytest.raises(PreRegistrationImportError, match="unsafe"):
+        parse_import_workbook(archive.getvalue())
 
 
 def test_admin_can_delete_only_unactivated_pre_registration_accounts() -> None:

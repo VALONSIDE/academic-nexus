@@ -31,6 +31,10 @@ const basic = reactive({ full_name: '', phone: '', is_active: true })
 
 const title = computed(() => props.role === 'student' ? t('studentManagement') : t('mentorManagement'))
 const selectedProfile = computed(() => selected.value?.profile || null)
+const isScopedAdministrator = computed(() => {
+  const roles = auth.state.user?.roles || []
+  return roles.includes('institution_admin') && !roles.includes('admin') && !roles.includes('super_admin')
+})
 
 function applySelected(user: ManagedUser) {
   selected.value = user
@@ -176,7 +180,7 @@ watch(() => props.role, () => {
   <DashboardLayout>
     <div>
       <h1 class="text-3xl font-semibold tracking-tight text-slate-900">{{ title }}</h1>
-      <p class="mt-3 leading-7 text-slate-600">{{ t('managementDescription') }}</p>
+      <p class="mt-3 leading-7 text-slate-600">{{ isScopedAdministrator ? t('institutionScopedManagementDescription') : t('managementDescription') }}</p>
 
       <Card class="mt-7 overflow-hidden">
         <form class="flex gap-2 border-b border-slate-200 p-4" @submit.prevent="loadUsers">

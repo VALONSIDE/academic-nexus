@@ -13,6 +13,8 @@ ROLE_SEEDS = (
     ("student", "学生", "Student"),
     ("mentor", "导师", "Mentor"),
     ("admin", "管理员", "Administrator"),
+    ("super_admin", "超级管理员", "Super administrator"),
+    ("institution_admin", "院校管理员", "Institution administrator"),
 )
 
 
@@ -48,8 +50,11 @@ def ensure_bootstrap_data() -> None:
                 is_verified=True,
             )
             admin.roles.append(roles["admin"])
+            admin.roles.append(roles["super_admin"])
             db.add(admin)
         elif admin.username is None:
             # Migration path for an administrator created by the previous login system.
             admin.username = settings.initial_admin_username.upper()
+        if not any(role.code == "super_admin" for role in admin.roles):
+            admin.roles.append(roles["super_admin"])
         db.commit()

@@ -6,6 +6,7 @@ from io import BytesIO
 import re
 from typing import Any
 import uuid
+from zipfile import BadZipFile, ZipFile
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -17,6 +18,7 @@ from app.core.security import hash_password
 from app.models.pre_registration import PreRegistration, PreRegistrationBatch
 from app.models.user import User
 from app.services.access_keys import access_key_fingerprint, generate_access_key
+from app.services.spreadsheet_safety import safe_spreadsheet_text
 
 TEMPLATE_SHEET = "预注册导入 Pre-registration"
 TEMPLATE_HEADERS = (
@@ -30,6 +32,8 @@ TEMPLATE_HEADERS = (
 ROLE_ALIASES = {"student": "student", "s": "student", "学生": "student", "mentor": "mentor", "teacher": "mentor", "t": "mentor", "导师": "mentor", "老师": "mentor"}
 ABBR_PATTERN = re.compile(r"^[A-Za-z0-9]{2,12}$")
 ACADEMIC_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
+MAX_XLSX_ARCHIVE_ENTRIES = 1000
+MAX_XLSX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 
 
 class PreRegistrationImportError(ValueError):
@@ -70,7 +74,20 @@ def _username(abbr: str, role: str, academic_id: str) -> str:
     return f"{abbr}_{'S' if role == 'student' else 'T'}{academic_id}".upper()
 
 
+def _validate_xlsx_archive(content: bytes) -> None:
+    """Reject archive bombs before openpyxl reads untrusted workbook XML."""
+    try:
+        with ZipFile(BytesIO(content)) as archive:
+            entries = archive.infolist()
+            total_size = sum(entry.file_size for entry in entries)
+    except (BadZipFile, OSError) as error:
+        raise PreRegistrationImportError(["无法读取 Excel 文件 / Unable to read Excel archive"]) from error
+    if not entries or len(entries) > MAX_XLSX_ARCHIVE_ENTRIES or total_size > MAX_XLSX_UNCOMPRESSED_BYTES:
+        raise PreRegistrationImportError(["Excel 文件结构不安全或内容过大 / Workbook archive is unsafe or too large"])
+
+
 def parse_import_workbook(content: bytes) -> list[PreparedRow]:
+    _validate_xlsx_archive(content)
     try:
         workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
     except Exception as error:
@@ -107,8 +124,10 @@ def parse_import_workbook(content: bytes) -> list[PreparedRow]:
 
 def _assert_usernames_available(db: Session, tenant_id: uuid.UUID, rows: list[PreparedRow]) -> None:
     usernames = [row.username for row in rows]
-    pre_registered = set(db.scalars(select(PreRegistration.username).where(PreRegistration.tenant_id == tenant_id, PreRegistration.username.in_(usernames))).all())
-    activated = set(db.scalars(select(User.username).where(User.tenant_id == tenant_id, User.username.in_(usernames))).all())
+    # Login deliberately accepts a username without a tenant selector, so a
+    # username must remain globally unique even when more tenants are added.
+    pre_registered = set(db.scalars(select(PreRegistration.username).where(PreRegistration.username.in_(usernames))).all())
+    activated = set(db.scalars(select(User.username).where(User.username.in_(usernames))).all())
     if unavailable := sorted(pre_registered | activated):
         raise PreRegistrationImportError([f"账户名称已存在且不可再次预注册 / Username already exists: {', '.join(unavailable[:10])}"])
 
@@ -157,7 +176,15 @@ def build_import_template() -> bytes:
 def build_receipt_workbook(rows: list[ReceiptRow], batch_id: uuid.UUID) -> bytes:
     workbook = Workbook(); sheet = workbook.active; sheet.title = "账户回执 Account Receipt"
     sheet.append(["账户名称 (Username)", "中文真实姓名 (Full Name)", "学校中文全称", "学院中文全称", "学工号 (Academic ID)", "Access Key"]); _style_header(list(sheet[1]))
-    for row in rows: sheet.append([row.username, row.full_name, row.institution_name_zh, row.college_name_zh, row.academic_id, row.access_key])
+    for row in rows:
+        sheet.append([
+            safe_spreadsheet_text(row.username),
+            safe_spreadsheet_text(row.full_name),
+            safe_spreadsheet_text(row.institution_name_zh),
+            safe_spreadsheet_text(row.college_name_zh),
+            safe_spreadsheet_text(row.academic_id),
+            safe_spreadsheet_text(row.access_key),
+        ])
     for column, width in zip("ABCDEF", (30, 22, 30, 30, 22, 26), strict=True): sheet.column_dimensions[column].width = width
     sheet.freeze_panes = "A2"; sheet.auto_filter.ref = sheet.dimensions
     note = workbook.create_sheet("安全说明 Security Notice"); note.append(["安全说明 / Security Notice"]); _style_header([note["A1"]]); note.append([f"批次 ID / Batch ID: {batch_id}"]); note.append(["请通过受控渠道向本人发放对应行的 Access Key。激活成功后该 Key 自动失效；系统不保存 Key 明文。"]); note.column_dimensions["A"].width = 110

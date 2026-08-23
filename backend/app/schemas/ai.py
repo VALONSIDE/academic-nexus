@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, field_validator
 
 
 AiTopic = Literal["academic_planning", "mentor_consultation", "learning_roadmap", "selection_advisor"]
+AiModelTier = Literal["light", "standard", "expert"]
+AiResponseMode = Literal["standard", "stream"]
 
 
 class AiConversationCreateRequest(BaseModel):
@@ -20,8 +22,22 @@ class AiConversationCreateRequest(BaseModel):
         return title.strip() or None if title is not None else None
 
 
+class AiConversationRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, title: str) -> str:
+        normalized = title.strip()
+        if not normalized:
+            raise ValueError("Conversation title cannot be empty / 会话名称不能为空")
+        return normalized
+
+
 class AiMessageCreateRequest(BaseModel):
     content: str = Field(min_length=1, max_length=6000)
+    model_tier: AiModelTier = "standard"
+    response_mode: AiResponseMode = "standard"
 
     @field_validator("content")
     @classmethod
@@ -60,6 +76,10 @@ class AiQuotaResponse(BaseModel):
     project_daily_limit: int
     project_daily_used: int
     project_daily_remaining: int
+    cycle_started_at: datetime
+    cycle_ends_at: datetime
+    cycle_credit_limit: int
+    cycle_credits_used: int
 
 
 class AiChatResponse(BaseModel):

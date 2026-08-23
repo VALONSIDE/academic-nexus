@@ -37,6 +37,10 @@ const { t } = useI18n()
       <div class="mx-auto flex w-full max-w-md flex-1 items-center py-12">
         <slot />
       </div>
+      <footer class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+        <span class="flex items-center gap-3"><RouterLink to="/about" class="font-medium text-slate-600 hover:text-slate-900">{{ t('about') }}</RouterLink><RouterLink to="/legal" class="font-medium text-slate-600 hover:text-slate-900">{{ t('legalCompliance') }}</RouterLink></span>
+        <span>{{ t('copyrightNotice') }}</span>
+      </footer>
     </section>
   </main>
 </template>

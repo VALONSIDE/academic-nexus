@@ -28,12 +28,14 @@ def test_authenticated_user_can_change_only_their_own_password() -> None:
         db.add(account)
         db.commit()
 
-        change_own_password(
+        result = change_own_password(
             PasswordChangeRequest(current_password="CurrentPassword2026", new_password="ChangedPassword2026"),
             account,
             db,
         )
         assert verify_password("ChangedPassword2026", account.password_hash)
+        assert account.auth_version == 1
+        assert result.access_token
         with pytest.raises(HTTPException, match="400"):
             change_own_password(
                 PasswordChangeRequest(current_password="WrongPassword2026", new_password="AnotherPassword2026"),

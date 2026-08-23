@@ -1,4 +1,4 @@
-export type Role = 'student' | 'mentor' | 'admin'
+export type Role = 'student' | 'mentor' | 'admin' | 'super_admin' | 'institution_admin'
 export type Locale = 'zh-CN' | 'en-US'
 
 export interface User {
@@ -32,6 +32,8 @@ export interface ActivationPayload extends LoginPayload {
   academic_id: string
   access_key: string
   preferred_locale: Locale
+  terms_accepted: true
+  privacy_accepted: true
 }
 
 export interface StudentAcademicProfile {
@@ -102,6 +104,8 @@ export interface AdminUserUpdatePayload {
 }
 
 export type AiTopic = 'academic_planning' | 'mentor_consultation' | 'learning_roadmap' | 'selection_advisor'
+export type AiModelTier = 'light' | 'standard' | 'expert'
+export type AiResponseMode = 'standard' | 'stream'
 
 export interface AiQuota {
   plan_code: string
@@ -112,6 +116,10 @@ export interface AiQuota {
   project_daily_limit: number
   project_daily_used: number
   project_daily_remaining: number
+  cycle_started_at: string
+  cycle_ends_at: string
+  cycle_credit_limit: number
+  cycle_credits_used: number
 }
 
 export interface AiMessage {
@@ -131,6 +139,69 @@ export interface AiConversation {
 
 export interface AiConversationDetail extends AiConversation {
   messages: AiMessage[]
+}
+
+export type SubscriptionPlan = 'basic' | 'pro' | 'ultra' | 'max'
+export type PremiumSubscriptionPlan = Exclude<SubscriptionPlan, 'basic'>
+
+export interface UserSubscription {
+  plan_code: SubscriptionPlan
+  credit_limit: number
+  credit_balance: number
+  credits_used: number
+  cycle_started_at: string
+  cycle_ends_at: string
+}
+
+export interface InstitutionSubscriptionAllocation {
+  institution_abbr: string
+  institution_name_zh: string
+  pro_credits: number
+  ultra_credits: number
+  max_credits: number
+}
+
+export interface InstitutionOption {
+  institution_abbr: string
+  institution_name_zh: string
+}
+
+export interface InstitutionAccount {
+  id: string
+  username: string
+  full_name: string
+  role: 'student' | 'mentor'
+  has_active_premium_subscription: boolean
+}
+
+export interface InstitutionAdminScope {
+  id: string
+  user_id: string
+  username: string
+  full_name: string
+  institution_abbr: string
+  institution_name_zh: string
+  created_at: string
+}
+
+export interface PremiumSubscriptionKey {
+  id: string
+  institution_abbr: string
+  institution_name_zh: string
+  plan_code: PremiumSubscriptionPlan
+  status: 'issued' | 'activated' | 'revoked'
+  issued_at: string
+  activated_at: string | null
+  revoked_at: string | null
+}
+
+export interface SubscriptionKeyDeliveryValidation {
+  row_number: number
+  key: string
+  plan_code: PremiumSubscriptionPlan | null
+  institution_abbr: string | null
+  institution_name_zh: string | null
+  status: 'available' | 'invalid' | 'unavailable' | 'not_authorized'
 }
 
 export interface AiChatResponse {

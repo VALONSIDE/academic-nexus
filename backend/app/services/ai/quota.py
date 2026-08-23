@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.ai import AiProjectDailyUsage, AiUsageEvent, AiUserDailyUsage, AiUserQuota
 from app.models.user import User
+from app.services.subscriptions import SubscriptionSnapshot, refresh_subscription, subscription_snapshot
 
 
 class AiQuotaExceededError(Exception):
@@ -30,6 +31,10 @@ class QuotaSnapshot:
     project_daily_limit: int
     project_daily_used: int
     project_daily_remaining: int
+    cycle_started_at: datetime
+    cycle_ends_at: datetime
+    cycle_credit_limit: int
+    cycle_credits_used: int
 
 
 def current_usage_date() -> date:
@@ -123,50 +128,73 @@ def _project_daily_usage(db: Session, usage_date: date, *, lock: bool = False) -
 
 def quota_snapshot(db: Session, user_id) -> QuotaSnapshot:
     usage_date = current_usage_date()
-    quota = ensure_user_quota(db, user_id)
+    user = db.scalar(select(User).where(User.id == user_id))
+    if user is None:
+        raise ValueError("User not found")
+    entitlement: SubscriptionSnapshot = subscription_snapshot(db, user)
+    quota = _quota(db, user_id)
+    if quota is None:  # Defensive: subscription_snapshot always synchronizes it.
+        quota = ensure_user_quota(db, user_id)
     user_usage = _user_daily_usage(db, user_id, usage_date)
     project_usage = _project_daily_usage(db, usage_date)
     settings = get_settings()
-    daily_remaining = max(0, min(quota.daily_limit - user_usage.calls_used, quota.credit_balance))
+    # Keep the historical response fields for old clients, but their values now
+    # express the active subscription cycle rather than a daily personal cap.
+    daily_remaining = entitlement.credit_balance
     return QuotaSnapshot(
-        plan_code=quota.plan_code,
-        daily_limit=quota.daily_limit,
-        daily_used=user_usage.calls_used,
+        plan_code=entitlement.plan_code,
+        daily_limit=entitlement.credit_limit,
+        daily_used=entitlement.credits_used,
         daily_remaining=daily_remaining,
-        credit_balance=quota.credit_balance,
+        credit_balance=entitlement.credit_balance,
         project_daily_limit=settings.ai_daily_project_limit,
         project_daily_used=project_usage.calls_used,
         project_daily_remaining=max(0, settings.ai_daily_project_limit - project_usage.calls_used),
+        cycle_started_at=entitlement.cycle_started_at,
+        cycle_ends_at=entitlement.cycle_ends_at,
+        cycle_credit_limit=entitlement.credit_limit,
+        cycle_credits_used=entitlement.credits_used,
     )
 
 
-def reserve_ai_call(db: Session, user: User, conversation_id) -> AiUsageEvent:
-    """Reserve exactly one call before reaching the provider.
+def reserve_ai_call(
+    db: Session,
+    user: User,
+    conversation_id,
+    *,
+    model: str | None = None,
+    credit_cost: int = 1,
+) -> AiUsageEvent:
+    """Reserve the selected model's credit cost before reaching the provider.
 
-    The rows are locked in a stable order, so concurrent requests cannot exceed either
-    the per-user daily ceiling or the project-wide environment-controlled ceiling.
+    The rows are locked in a stable order, so concurrent requests cannot exceed the
+    subscription-cycle balance or the project-wide environment-controlled ceiling.
     """
     usage_date = current_usage_date()
-    quota = ensure_user_quota(db, user.id, lock=True)
+    if credit_cost < 1:
+        raise ValueError("credit_cost must be positive")
+    refresh_subscription(db, user, lock=True)
+    quota = _quota(db, user.id, lock=True)
+    if quota is None:
+        quota = ensure_user_quota(db, user.id, lock=True)
     user_usage = _user_daily_usage(db, user.id, usage_date, lock=True)
     project_usage = _project_daily_usage(db, usage_date, lock=True)
     settings = get_settings()
-    if quota.credit_balance <= 0:
+    if quota.credit_balance < credit_cost:
         raise AiQuotaExceededError("credit_balance_exhausted")
-    if user_usage.calls_used >= quota.daily_limit:
-        raise AiQuotaExceededError("user_daily_limit_reached")
-    if project_usage.calls_used >= settings.ai_daily_project_limit:
+    if project_usage.calls_used + credit_cost > settings.ai_daily_project_limit:
         raise AiQuotaExceededError("project_daily_limit_reached")
 
-    user_usage.calls_used += 1
-    project_usage.calls_used += 1
-    quota.credit_balance -= 1
+    user_usage.calls_used += credit_cost
+    project_usage.calls_used += credit_cost
+    quota.credit_balance -= credit_cost
     event = AiUsageEvent(
         tenant_id=user.tenant_id,
         user_id=user.id,
         conversation_id=conversation_id,
         usage_date=usage_date,
-        model=settings.minimax_model,
+        model=model or settings.minimax_model,
+        credit_cost=credit_cost,
         status="reserved",
     )
     db.add(event)
@@ -191,12 +219,14 @@ def release_ai_call(db: Session, event_id, *, error_code: str) -> None:
     event = db.scalar(select(AiUsageEvent).where(AiUsageEvent.id == event_id).with_for_update())
     if event is None or event.status != "reserved":
         return
-    quota = ensure_user_quota(db, event.user_id, lock=True)
+    quota = _quota(db, event.user_id, lock=True)
+    if quota is None:
+        quota = ensure_user_quota(db, event.user_id, lock=True)
     user_usage = _user_daily_usage(db, event.user_id, event.usage_date, lock=True)
     project_usage = _project_daily_usage(db, event.usage_date, lock=True)
-    quota.credit_balance += 1
-    user_usage.calls_used = max(0, user_usage.calls_used - 1)
-    project_usage.calls_used = max(0, project_usage.calls_used - 1)
+    quota.credit_balance += event.credit_cost
+    user_usage.calls_used = max(0, user_usage.calls_used - event.credit_cost)
+    project_usage.calls_used = max(0, project_usage.calls_used - event.credit_cost)
     event.status = "failed"
     event.error_code = error_code[:80]
     event.completed_at = datetime.now(timezone.utc)
@@ -214,16 +244,24 @@ def update_user_quota(
 ) -> QuotaSnapshot:
     """Admin-only changes. Project capacity remains immutable outside environment config."""
     usage_date = current_usage_date()
-    quota = ensure_user_quota(db, user_id, lock=True)
+    user = db.scalar(select(User).where(User.id == user_id))
+    if user is None:
+        raise ValueError("User not found")
+    subscription = refresh_subscription(db, user, lock=True)
+    quota = _quota(db, user_id, lock=True)
+    if quota is None:
+        quota = ensure_user_quota(db, user_id, lock=True)
     user_usage = _user_daily_usage(db, user_id, usage_date, lock=True)
     project_usage = _project_daily_usage(db, usage_date, lock=True)
     settings = get_settings()
     if daily_limit is not None:
         quota.daily_limit = daily_limit
+        subscription.credit_limit = daily_limit
     if credit_balance is not None:
         quota.credit_balance = credit_balance
     if plan_code is not None:
         quota.plan_code = plan_code
+        subscription.plan_code = plan_code
     if daily_used is not None:
         delta = daily_used - user_usage.calls_used
         if project_usage.calls_used + delta > settings.ai_daily_project_limit:

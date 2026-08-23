@@ -20,11 +20,17 @@ const fullName = ref('')
 const academicId = ref('')
 const accessKey = ref('')
 const password = ref('')
+const termsAccepted = ref(false)
+const privacyAccepted = ref(false)
 const error = ref('')
 const submitting = ref(false)
 
 async function submit() {
   error.value = ''
+  if (!termsAccepted.value || !privacyAccepted.value) {
+    error.value = t('consentRequired')
+    return
+  }
   submitting.value = true
   try {
     await auth.startActivation({
@@ -34,6 +40,8 @@ async function submit() {
       access_key: accessKey.value,
       password: password.value,
       preferred_locale: i18n.global.locale.value as Locale,
+      terms_accepted: true,
+      privacy_accepted: true,
     })
     await router.push('/activate/profile')
   } catch {
@@ -76,6 +84,7 @@ async function submit() {
           <Input v-model="password" type="password" autocomplete="new-password" minlength="12" required />
           <span class="font-normal text-slate-400">{{ t('passwordHint') }}</span>
         </label>
+        <div class="space-y-2 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-600"><label class="flex items-start gap-2"><input v-model="termsAccepted" class="mt-1 h-3.5 w-3.5 rounded border-slate-300 text-slate-950 focus:ring-slate-900" type="checkbox" /><span>{{ t('agreeTermsPrefix') }} <RouterLink to="/legal/terms" class="font-medium text-sky-700 hover:text-sky-800">{{ t('termsOfService') }}</RouterLink></span></label><label class="flex items-start gap-2"><input v-model="privacyAccepted" class="mt-1 h-3.5 w-3.5 rounded border-slate-300 text-slate-950 focus:ring-slate-900" type="checkbox" /><span>{{ t('agreeTermsPrefix') }} <RouterLink to="/legal/privacy" class="font-medium text-sky-700 hover:text-sky-800">{{ t('privacyPolicy') }}</RouterLink></span></label></div>
         <p v-if="error" class="whitespace-pre-line rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{{ error }}</p>
         <Button class="w-full" type="submit" size="lg" :disabled="submitting">{{ submitting ? t('loading') : t('continue') }}</Button>
       </form>

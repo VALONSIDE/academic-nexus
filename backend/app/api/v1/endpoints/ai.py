@@ -1,11 +1,14 @@
+import json
+from collections.abc import Iterator
 from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DbSession, require_roles
+from app.api.deps import DbSession, require_roles, require_super_admin
 from app.models.ai import AiConversation, AiMessage
 from app.models.user import User
 from app.schemas.ai import (
@@ -15,12 +18,13 @@ from app.schemas.ai import (
     AiChatResponse,
     AiConversationCreateRequest,
     AiConversationDetailResponse,
+    AiConversationRenameRequest,
     AiConversationResponse,
     AiMessageCreateRequest,
     AiMessageResponse,
     AiQuotaResponse,
 )
-from app.services.ai.assistant import AiAssistantError, create_conversation, get_conversation, list_conversations, list_messages, send_message
+from app.services.ai.assistant import AiAssistantError, create_conversation, delete_conversation, get_conversation, list_conversations, list_messages, rename_conversation, send_message, stream_message
 from app.services.ai.quota import AiQuotaExceededError, QuotaSnapshot, quota_snapshot, update_user_quota
 
 router = APIRouter(prefix="/ai", tags=["AI assistant / AI 助手"])
@@ -38,6 +42,10 @@ def _quota_response(snapshot: QuotaSnapshot) -> AiQuotaResponse:
         project_daily_limit=snapshot.project_daily_limit,
         project_daily_used=snapshot.project_daily_used,
         project_daily_remaining=snapshot.project_daily_remaining,
+        cycle_started_at=snapshot.cycle_started_at,
+        cycle_ends_at=snapshot.cycle_ends_at,
+        cycle_credit_limit=snapshot.cycle_credit_limit,
+        cycle_credits_used=snapshot.cycle_credits_used,
     )
 
 
@@ -64,6 +72,10 @@ def _raise_assistant_error(error: AiAssistantError | AiQuotaExceededError) -> No
     if error.code == "provider_not_configured":
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": error.code}) from error
     raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail={"code": error.code}) from error
+
+
+def _sse(event: str, payload: object) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @router.get("/quota", response_model=AiQuotaResponse, summary="Read personal AI quota / 获取个人 AI 配额")
@@ -100,18 +112,79 @@ def read_conversation(
     return AiConversationDetailResponse(**base.model_dump(), messages=[_message_response(item) for item in list_messages(db, conversation)])
 
 
+@router.patch("/conversations/{conversation_id}", response_model=AiConversationResponse, summary="Rename AI conversation / 修改 AI 会话名称")
+def rename_ai_conversation(
+    conversation_id: UUID,
+    payload: AiConversationRenameRequest,
+    db: DbSession,
+    current_user: User = Depends(require_roles("student", "mentor")),
+) -> AiConversationResponse:
+    conversation = get_conversation(db, current_user, conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found / 未找到会话")
+    return _conversation_response(rename_conversation(db, conversation, title=payload.title))
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete AI conversation / 删除 AI 对话")
+def delete_ai_conversation(
+    conversation_id: UUID,
+    db: DbSession,
+    current_user: User = Depends(require_roles("student", "mentor")),
+) -> None:
+    conversation = get_conversation(db, current_user, conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found / 未找到会话")
+    delete_conversation(db, conversation)
+
+
 @router.post("/conversations/{conversation_id}/messages", response_model=AiChatResponse, summary="Send AI chat message / 发送 AI 对话消息")
 def send_ai_message(
     conversation_id: UUID,
     payload: AiMessageCreateRequest,
     db: DbSession,
     current_user: User = Depends(require_roles("student", "mentor")),
-) -> AiChatResponse:
+) -> AiChatResponse | StreamingResponse:
     conversation = get_conversation(db, current_user, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found / 未找到会话")
+    if payload.response_mode == "stream":
+        def event_stream() -> Iterator[str]:
+            try:
+                for event in stream_message(
+                    db,
+                    current_user,
+                    conversation,
+                    content=payload.content,
+                    model_tier=payload.model_tier,
+                ):
+                    if event.text:
+                        yield _sse("text", {"text": event.text})
+                    elif event.user_message is not None and event.assistant_message is not None:
+                        snapshot = quota_snapshot(db, current_user.id)
+                        db.commit()
+                        result = AiChatResponse(
+                            user_message=_message_response(event.user_message),
+                            assistant_message=_message_response(event.assistant_message),
+                            quota=_quota_response(snapshot),
+                        )
+                        yield _sse("done", result.model_dump(mode="json"))
+            except (AiAssistantError, AiQuotaExceededError) as error:
+                yield _sse("error", {"code": error.code})
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     try:
-        user_message, assistant_message = send_message(db, current_user, conversation, content=payload.content)
+        user_message, assistant_message = send_message(
+            db,
+            current_user,
+            conversation,
+            content=payload.content,
+            model_tier=payload.model_tier,
+        )
     except (AiAssistantError, AiQuotaExceededError) as error:
         _raise_assistant_error(error)
     snapshot = quota_snapshot(db, current_user.id)
@@ -134,7 +207,7 @@ def _managed_role(user: User) -> ManagedRole | None:
 @admin_router.get("/quotas", response_model=AdminAiQuotaListResponse, summary="List AI quotas / 查询 AI 配额")
 def list_ai_quotas(
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
     role: ManagedRole | None = Query(default=None),
     search: str = Query(default="", max_length=100),
 ) -> AdminAiQuotaListResponse:
@@ -189,7 +262,7 @@ def update_ai_quota(
     user_id: UUID,
     payload: AdminAiQuotaUpdateRequest,
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
 ) -> AiQuotaResponse:
     target = db.scalar(select(User).options(selectinload(User.roles)).where(User.id == user_id, User.tenant_id == admin.tenant_id))
     if target is None or _managed_role(target) is None:

@@ -29,6 +29,7 @@ class PreRegistration(Base):
         CheckConstraint("role_code IN ('student', 'mentor')", name="ck_pre_registrations_role_code"),
         CheckConstraint("status IN ('issued', 'activated', 'revoked')", name="ck_pre_registrations_status"),
         UniqueConstraint("tenant_id", "username", name="uq_pre_registrations_tenant_username"),
+        UniqueConstraint("username", name="uq_pre_registrations_username_global"),
         UniqueConstraint("access_key_fingerprint", name="uq_pre_registrations_access_key_fingerprint"),
     )
 

@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser, DbSession, require_roles
+from app.api.deps import CurrentUser, DbSession, require_roles, require_super_admin
 from app.models.resource import MentorResourceQuota, Resource
 from app.models.user import User
 from app.schemas.resource import (
@@ -221,7 +221,7 @@ def delete_resource(resource_id: UUID, db: DbSession, mentor: User = Depends(req
 @admin_router.get("", response_model=AdminResourceQuotaListResponse, summary="List mentor resource quotas / 查询导师资源配额")
 def list_resource_quotas(
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
     search: str = Query(default="", max_length=100),
 ) -> AdminResourceQuotaListResponse:
     statement = select(User).options(selectinload(User.roles)).where(User.tenant_id == admin.tenant_id, User.roles.any(code="mentor"))
@@ -249,7 +249,7 @@ def update_resource_quota(
     user_id: UUID,
     payload: AdminResourceQuotaUpdateRequest,
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
 ) -> MentorResourceQuotaResponse:
     mentor = db.scalar(select(User).options(selectinload(User.roles)).where(User.id == user_id, User.tenant_id == admin.tenant_id))
     if mentor is None or not any(role.code == "mentor" for role in mentor.roles):

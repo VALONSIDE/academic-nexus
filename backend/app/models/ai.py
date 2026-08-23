@@ -59,6 +59,30 @@ class AiUserQuota(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class AiUserSubscription(Base):
+    """The current AI entitlement and its calendar-month billing cycle.
+
+    ``AiUserQuota`` remains the transactional balance used by the request path;
+    this table is the source of truth for plan and reset dates.
+    """
+
+    __tablename__ = "ai_user_subscriptions"
+    __table_args__ = (
+        CheckConstraint("plan_code IN ('basic', 'pro', 'ultra', 'max')", name="ck_ai_user_subscriptions_plan_code"),
+        CheckConstraint("credit_limit >= 0", name="ck_ai_user_subscriptions_credit_limit"),
+        CheckConstraint("cycle_ends_at > cycle_started_at", name="ck_ai_user_subscriptions_cycle_order"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    plan_code: Mapped[str] = mapped_column(String(16), default="basic")
+    cycle_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    cycle_ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    credit_limit: Mapped[int] = mapped_column(Integer, default=10)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class AiUserDailyUsage(Base):
     __tablename__ = "ai_user_daily_usage"
     __table_args__ = (UniqueConstraint("user_id", "usage_date", name="uq_ai_user_daily_usage_user_date"),)
@@ -90,6 +114,7 @@ class AiUsageEvent(Base):
     conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ai_conversations.id", ondelete="SET NULL"), nullable=True, index=True)
     usage_date: Mapped[date] = mapped_column(Date, index=True)
     model: Mapped[str] = mapped_column(String(80))
+    credit_cost: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(16), default="reserved")
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)

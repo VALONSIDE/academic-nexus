@@ -34,7 +34,10 @@ async function submit() {
   submitting.value = true
   try {
     const user = await auth.login({ username: username.value, password: password.value })
-    if (!user.roles.includes(selectedRole.value)) {
+    const hasSelectedRole = selectedRole.value === 'admin'
+      ? user.roles.some(role => ['admin', 'super_admin', 'institution_admin'].includes(role))
+      : user.roles.includes(selectedRole.value)
+    if (!hasSelectedRole) {
       auth.logout()
       error.value = t('roleMismatch')
       return

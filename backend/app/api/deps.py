@@ -11,6 +11,7 @@ from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.models.pre_registration import PreRegistration
 from app.models.user import User
+from app.services.admin_scope import ADMINISTRATOR_ROLES, SUPER_ADMIN_ROLES
 
 bearer_scheme = HTTPBearer(auto_error=False)
 DbSession = Annotated[Session, Depends(get_db)]
@@ -36,7 +37,7 @@ def get_current_user(
     except (ValueError, TypeError):
         raise unauthorized from None
     user = db.scalar(select(User).options(selectinload(User.roles)).where(User.id == user_id))
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or payload.get("auth_version") != user.auth_version:
         raise unauthorized
     return user
 
@@ -68,7 +69,12 @@ def get_pending_registration_user(
         .options(selectinload(User.roles), selectinload(User.student_profile), selectinload(User.mentor_profile))
         .where(User.id == user_id)
     )
-    if user is None or user.is_active or user.pre_registration_id is None:
+    if (
+        user is None
+        or user.is_active
+        or user.pre_registration_id is None
+        or payload.get("auth_version") != user.auth_version
+    ):
         raise unauthorized
     pre_registration = db.scalar(select(PreRegistration).where(PreRegistration.id == user.pre_registration_id))
     if pre_registration is None or pre_registration.status != "issued":
@@ -92,3 +98,19 @@ def require_roles(*allowed_roles: str) -> Callable:
         return current_user
 
     return role_checker
+
+
+def require_administrator(current_user: CurrentUser) -> User:
+    """Allow either a scoped institution administrator or a super administrator."""
+    current_roles = {role.code for role in current_user.roles}
+    if not current_roles.intersection(ADMINISTRATOR_ROLES):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator permission required / 需要管理员权限")
+    return current_user
+
+
+def require_super_admin(current_user: CurrentUser) -> User:
+    """Allow the new role and the legacy ``admin`` bootstrap role."""
+    current_roles = {role.code for role in current_user.roles}
+    if not current_roles.intersection(SUPER_ADMIN_ROLES):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super administrator permission required / 需要超级管理员权限")
+    return current_user

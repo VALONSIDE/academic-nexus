@@ -16,7 +16,7 @@ import type { MentorAcademicProfile, Role, StudentAcademicProfile } from '@/type
 
 type Panel = 'password' | 'portrait' | 'quota' | null
 const auth = useAuthStore(); const { t } = useI18n(); const route = useRoute(); const router = useRouter()
-const role = computed<Role>(() => auth.state.user?.roles.includes('admin') ? 'admin' : auth.state.user?.roles.includes('mentor') ? 'mentor' : 'student')
+const role = computed<Role>(() => auth.state.user?.roles.some(role => ['admin', 'super_admin', 'institution_admin'].includes(role)) ? 'admin' : auth.state.user?.roles.includes('mentor') ? 'mentor' : 'student')
 const hasPortrait = computed(() => role.value !== 'admin'); const activePanel = ref<Panel>(null)
 const profile = ref<StudentAcademicProfile | MentorAcademicProfile | null>(null); const currentPassword = ref(''); const newPassword = ref(''); const confirmation = ref('')
 const loadingProfile = ref(false); const savingProfile = ref(false); const changingPassword = ref(false); const notice = ref(''); const error = ref('')
@@ -25,7 +25,7 @@ function closePanel() { activePanel.value = null; const query = { ...route.query
 watch(() => route.query.panel, (panel) => { activePanel.value = panel === 'password' || panel === 'portrait' || panel === 'quota' ? panel : null }, { immediate: true })
 async function loadProfile() { if (!auth.state.token || !hasPortrait.value) return; loadingProfile.value = true; try { profile.value = (role.value === 'student' ? await authApi.studentProfile(auth.state.token) : await authApi.mentorProfile(auth.state.token)).data } catch { error.value = t('updateFailed') } finally { loadingProfile.value = false } }
 async function saveProfile(payload: StudentAcademicProfile | MentorAcademicProfile) { if (!auth.state.token) return; savingProfile.value = true; error.value = ''; try { profile.value = (role.value === 'student' ? await authApi.updateStudentProfile(auth.state.token, payload as StudentAcademicProfile) : await authApi.updateMentorProfile(auth.state.token, payload as MentorAcademicProfile)).data; notice.value = t('portraitSaved'); closePanel() } catch { error.value = t('updateFailed') } finally { savingProfile.value = false } }
-async function changePassword() { if (!auth.state.token) return; error.value = ''; if (newPassword.value !== confirmation.value) { error.value = t('passwordMismatch'); return }; changingPassword.value = true; try { await authApi.changeOwnPassword(auth.state.token, currentPassword.value, newPassword.value); currentPassword.value = ''; newPassword.value = ''; confirmation.value = ''; notice.value = t('passwordChanged'); closePanel() } catch (exception) { error.value = exception instanceof ApiError && exception.code === 'current_password_incorrect' ? t('currentPasswordIncorrect') : t('updateFailed') } finally { changingPassword.value = false } }
+async function changePassword() { if (!auth.state.token) return; error.value = ''; if (newPassword.value !== confirmation.value) { error.value = t('passwordMismatch'); return }; changingPassword.value = true; try { await auth.changePassword(currentPassword.value, newPassword.value); currentPassword.value = ''; newPassword.value = ''; confirmation.value = ''; notice.value = t('passwordChanged'); closePanel() } catch (exception) { error.value = exception instanceof ApiError && exception.code === 'current_password_incorrect' ? t('currentPasswordIncorrect') : t('updateFailed') } finally { changingPassword.value = false } }
 onMounted(loadProfile)
 </script>
 

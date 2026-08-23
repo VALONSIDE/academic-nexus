@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DbSession, require_roles
+from app.api.deps import DbSession, require_roles, require_super_admin
 from app.models.selection import MentorSelection, MentorSelectionSetting, StudentSelectionSetting
 from app.models.user import User
 from app.schemas.selection import (
@@ -149,13 +149,13 @@ def reject_student(selection_id: UUID, payload: NotePayload, db: DbSession, ment
 
 
 @admin_router.get("/settings", response_model=SelectionSettingsResponse)
-def get_admin_settings(db: DbSession, admin: User = Depends(require_roles("admin"))) -> SelectionSettingsResponse:
+def get_admin_settings(db: DbSession, admin: User = Depends(require_super_admin)) -> SelectionSettingsResponse:
     item = tenant_settings(db, admin.tenant_id)
     return SelectionSettingsResponse(is_open=item.is_open, default_capacity=item.default_capacity, default_student_choice_limit=item.default_student_choice_limit)
 
 
 @admin_router.patch("/settings", response_model=SelectionSettingsResponse)
-def update_admin_settings(payload: SelectionSettingsUpdate, db: DbSession, admin: User = Depends(require_roles("admin"))) -> SelectionSettingsResponse:
+def update_admin_settings(payload: SelectionSettingsUpdate, db: DbSession, admin: User = Depends(require_super_admin)) -> SelectionSettingsResponse:
     item = tenant_settings(db, admin.tenant_id, lock=True)
     if payload.is_open is not None:
         item.is_open = payload.is_open
@@ -170,7 +170,7 @@ def update_admin_settings(payload: SelectionSettingsUpdate, db: DbSession, admin
 @admin_router.get("/users", response_model=list[AdminSelectionUserResponse])
 def list_selection_users(
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
     role: str = "student",
 ) -> list[AdminSelectionUserResponse]:
     if role not in {"student", "mentor"}:
@@ -196,7 +196,7 @@ def update_selection_user(
     user_id: UUID,
     payload: AdminSelectionUserUpdate,
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
 ) -> AdminSelectionUserResponse:
     user = db.scalar(select(User).options(selectinload(User.roles), selectinload(User.student_profile), selectinload(User.mentor_profile)).where(User.id == user_id, User.tenant_id == admin.tenant_id).with_for_update())
     if user is None:
@@ -232,7 +232,7 @@ def update_selection_user(
 @admin_router.get("/records", response_model=AdminSelectionRecordListResponse)
 def list_selection_records(
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
     selection_status: str | None = None,
     search: str = "",
 ) -> AdminSelectionRecordListResponse:
@@ -284,7 +284,7 @@ def _release_selection_records(db: DbSession, admin: User, selection_ids: list[U
 def release_selection_record(
     selection_id: UUID,
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
 ) -> None:
     """Administrator override equivalent to releasing a locked historical selection."""
     _release_selection_records(db, admin, [selection_id])
@@ -294,6 +294,6 @@ def release_selection_record(
 def bulk_release_selection_records(
     payload: AdminSelectionBulkReleaseRequest,
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
 ) -> None:
     _release_selection_records(db, admin, payload.selection_ids)

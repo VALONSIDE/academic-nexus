@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import ai, auth, dashboard, matching, pre_registrations, profiles, resources, selection, users
+from app.api.v1.endpoints import subscriptions
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -16,3 +17,6 @@ api_router.include_router(resources.mentor_router)
 api_router.include_router(resources.admin_router)
 api_router.include_router(ai.router)
 api_router.include_router(ai.admin_router)
+api_router.include_router(subscriptions.router)
+api_router.include_router(subscriptions.admin_router)
+api_router.include_router(subscriptions.delivery_router)

@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import or_, select
-from app.api.deps import DbSession, require_roles
+from app.api.deps import DbSession, require_super_admin
 from app.models.pre_registration import PreRegistration
 from app.models.user import User
 from app.schemas.pre_registration import PreRegistrationAdminResponse, PreRegistrationBulkDeleteRequest, PreRegistrationListResponse
@@ -58,7 +58,7 @@ def _delete_issued_items(db: DbSession, admin: User, ids: list[UUID]) -> int:
 @router.get("", response_model=PreRegistrationListResponse, summary="List imported accounts / 查询预注册账户")
 def list_pre_registrations(
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
     role: Literal["student", "mentor"] | None = Query(default=None),
     account_status: Literal["issued", "activated", "revoked"] | None = Query(default=None),
     search: str = Query(default="", max_length=100),
@@ -79,7 +79,7 @@ def list_pre_registrations(
 def delete_pre_registration(
     pre_registration_id: UUID,
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
 ) -> None:
     _delete_issued_items(db, admin, [pre_registration_id])
 
@@ -88,13 +88,13 @@ def delete_pre_registration(
 def bulk_delete_pre_registrations(
     payload: PreRegistrationBulkDeleteRequest,
     db: DbSession,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_super_admin),
 ) -> None:
     _delete_issued_items(db, admin, payload.ids)
 
 
 @router.get("/template", summary="Download pre-registration template / 下载预注册模板")
-def download_template(_admin: User = Depends(require_roles("admin"))) -> Response:
+def download_template(_admin: User = Depends(require_super_admin)) -> Response:
     return Response(
         content=build_import_template(),
         media_type=XLSX_MEDIA_TYPE,
@@ -106,7 +106,7 @@ def download_template(_admin: User = Depends(require_roles("admin"))) -> Respons
 async def import_workbook(
     file: Annotated[UploadFile, File(description="Partner-school pre-registration workbook / 合作院校预注册 Excel")],
     db: DbSession,
-    _admin: User = Depends(require_roles("admin")),
+    _admin: User = Depends(require_super_admin),
 ) -> Response:
     filename = file.filename or "pre-registration.xlsx"
     if not filename.lower().endswith(".xlsx"):

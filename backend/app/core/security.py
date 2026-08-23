@@ -22,12 +22,16 @@ def verify_password(password: str, password_hash: str | None) -> bool:
     return password_hasher.verify(password, password_hash or _DUMMY_PASSWORD_HASH)
 
 
-def create_access_token(*, subject: str, roles: list[str], scope: str = "authenticated") -> str:
+def create_access_token(*, subject: str, roles: list[str], auth_version: int = 0, scope: str = "authenticated") -> str:
     settings = get_settings()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
     payload: dict[str, Any] = {
         "sub": subject,
         "roles": roles,
+        # Incremented on password resets and account suspension so stolen or
+        # previously issued tokens can be invalidated without rotating the
+        # global signing key for every user.
+        "auth_version": auth_version,
         "scope": scope,
         "exp": expires_at,
         "iat": datetime.now(timezone.utc),

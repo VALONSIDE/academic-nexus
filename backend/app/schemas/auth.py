@@ -29,6 +29,8 @@ class ActivationRequest(BaseModel):
     access_key: str = Field(min_length=19, max_length=19)
     password: str = Field(min_length=12, max_length=128)
     preferred_locale: Locale = "zh-CN"
+    terms_accepted: Literal[True]
+    privacy_accepted: Literal[True]
 
     @field_validator("username")
     @classmethod

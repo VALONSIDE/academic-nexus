@@ -9,8 +9,14 @@ import type {
   AiChatResponse,
   AiConversation,
   AiConversationDetail,
+  AiModelTier,
   AiQuota,
+  AiResponseMode,
   AiTopic,
+  InstitutionAdminScope,
+  InstitutionAccount,
+  InstitutionOption,
+  InstitutionSubscriptionAllocation,
   DashboardOverview,
   LoginPayload,
   ManagedUser,
@@ -23,6 +29,9 @@ import type {
   StudentCandidateListResponse,
   LearningResourceListResponse,
   ResourceType,
+  PremiumSubscriptionKey,
+  PremiumSubscriptionPlan,
+  SubscriptionKeyDeliveryValidation,
   MentorSelection,
   MentorSelectionSettings,
   SelectionCandidateListResponse,
@@ -31,6 +40,7 @@ import type {
   AdminSelectionRecordListResponse,
   PreRegistrationAccountListResponse,
   User,
+  UserSubscription,
 } from '@/types/auth'
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
@@ -80,7 +90,7 @@ export const authApi = {
     return request<User>('/auth/me/locale', { method: 'PATCH', body: JSON.stringify({ preferred_locale }) }, token)
   },
   changeOwnPassword(token: string, current_password: string, new_password: string) {
-    return request<void>('/auth/me/password', { method: 'POST', body: JSON.stringify({ current_password, new_password }) }, token)
+    return request<AuthResponse>('/auth/me/password', { method: 'POST', body: JSON.stringify({ current_password, new_password }) }, token)
   },
   dashboard(token: string) {
     return request<DashboardOverview>('/dashboard', {}, token)
@@ -227,11 +237,50 @@ export const authApi = {
   createAiConversation(token: string, topic: AiTopic, title?: string) {
     return request<AiConversation>('/ai/conversations', { method: 'POST', body: JSON.stringify({ topic, title }) }, token)
   },
+  renameAiConversation(token: string, conversationId: string, title: string) {
+    return request<AiConversation>(`/ai/conversations/${conversationId}`, { method: 'PATCH', body: JSON.stringify({ title }) }, token)
+  },
+  deleteAiConversation(token: string, conversationId: string) {
+    return request<void>(`/ai/conversations/${conversationId}`, { method: 'DELETE' }, token)
+  },
   aiConversation(token: string, conversationId: string) {
     return request<AiConversationDetail>(`/ai/conversations/${conversationId}`, {}, token)
   },
-  sendAiMessage(token: string, conversationId: string, content: string) {
-    return request<AiChatResponse>(`/ai/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ content }) }, token)
+  sendAiMessage(token: string, conversationId: string, content: string, options: { model_tier: AiModelTier; response_mode: AiResponseMode }) {
+    return request<AiChatResponse>(`/ai/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ content, ...options }) }, token)
+  },
+  async sendAiMessageStream(token: string, conversationId: string, content: string, model_tier: AiModelTier, onText: (text: string) => void): Promise<AiChatResponse> {
+    const response = await fetch(`${baseUrl}/ai/conversations/${conversationId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ content, model_tier, response_mode: 'stream' }),
+    })
+    if (!response.ok) throw await responseError(response)
+    if (!response.body) throw new ApiError('Streaming response body is unavailable')
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let completed: AiChatResponse | null = null
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+      const events = buffer.split(/\r?\n\r?\n/)
+      buffer = events.pop() || ''
+      for (const rawEvent of events) {
+        const lines = rawEvent.split(/\r?\n/)
+        const event = lines.find(line => line.startsWith('event:'))?.slice(6).trim()
+        const rawData = lines.find(line => line.startsWith('data:'))?.slice(5).trim()
+        if (!event || !rawData) continue
+        const data = JSON.parse(rawData) as { text?: string; code?: string } | AiChatResponse
+        if (event === 'text' && 'text' in data && data.text) onText(data.text)
+        if (event === 'error' && 'code' in data) throw new ApiError(data.code || 'Streaming request failed', [], data.code)
+        if (event === 'done') completed = data as AiChatResponse
+      }
+      if (done) break
+    }
+    if (!completed) throw new ApiError('Streaming response ended without a completion event')
+    return completed
   },
   adminAiQuotas(token: string, role?: 'student' | 'mentor', search = '') {
     const query = new URLSearchParams({ ...(role ? { role } : {}), ...(search ? { search } : {}) })
@@ -239,6 +288,56 @@ export const authApi = {
   },
   updateAdminAiQuota(token: string, userId: string, payload: { daily_limit?: number; credit_balance?: number; daily_used?: number; plan_code?: string }) {
     return request<AiQuota>(`/admin/ai/quotas/${userId}`, { method: 'PATCH', body: JSON.stringify(payload) }, token)
+  },
+  subscription(token: string) {
+    return request<UserSubscription>('/subscriptions/me', {}, token)
+  },
+  activateSubscriptionKey(token: string, key: string) {
+    return request<UserSubscription>('/subscriptions/activate', { method: 'POST', body: JSON.stringify({ key }) }, token)
+  },
+  subscriptionAllocations(token: string) {
+    return request<InstitutionSubscriptionAllocation[]>('/admin/subscriptions/allocations', {}, token)
+  },
+  subscriptionInstitutions(token: string) {
+    return request<InstitutionOption[]>('/admin/subscriptions/institutions', {}, token)
+  },
+  institutionAccounts(token: string, institutionAbbr: string) {
+    return request<InstitutionAccount[]>(`/admin/subscriptions/institutions/${encodeURIComponent(institutionAbbr)}/accounts`, {}, token)
+  },
+  saveSubscriptionAllocation(token: string, institutionAbbr: string, payload: Pick<InstitutionSubscriptionAllocation, 'pro_credits' | 'ultra_credits' | 'max_credits'>) {
+    return request<InstitutionSubscriptionAllocation>(`/admin/subscriptions/allocations/${encodeURIComponent(institutionAbbr)}`, { method: 'PUT', body: JSON.stringify(payload) }, token)
+  },
+  institutionAdminScopes(token: string) {
+    return request<InstitutionAdminScope[]>('/admin/subscriptions/institution-admins', {}, token)
+  },
+  myInstitutionAdminScopes(token: string) {
+    return request<InstitutionAdminScope[]>('/admin/subscriptions/my-scopes', {}, token)
+  },
+  assignInstitutionAdmin(token: string, payload: { user_id: string; institution_abbr: string }) {
+    return request<InstitutionAdminScope>('/admin/subscriptions/institution-admins', { method: 'POST', body: JSON.stringify(payload) }, token)
+  },
+  removeInstitutionAdmin(token: string, scopeId: string) {
+    return request<void>(`/admin/subscriptions/institution-admins/${scopeId}`, { method: 'DELETE' }, token)
+  },
+  premiumSubscriptionKeys(token: string) {
+    return request<PremiumSubscriptionKey[]>('/admin/subscriptions/keys', {}, token)
+  },
+  issuePremiumSubscriptionKeysReceipt(token: string, payload: { institution_abbr: string; plan_code: PremiumSubscriptionPlan; quantity: number }) {
+    return download('/admin/subscriptions/keys/batch', { method: 'POST', body: JSON.stringify(payload) }, token)
+  },
+  revokePremiumSubscriptionKey(token: string, keyId: string) {
+    return request<PremiumSubscriptionKey>(`/admin/subscriptions/keys/${keyId}`, { method: 'DELETE' }, token)
+  },
+  validateSubscriptionDeliveryReceipt(token: string, file: File) {
+    const form = new FormData()
+    form.append('file', file)
+    return upload<SubscriptionKeyDeliveryValidation[]>('/admin/subscription-delivery/validate-excel', form, token)
+  },
+  directlyActivateSubscriptionDelivery(token: string, items: { key: string; recipient_user_id?: string }[]) {
+    return request<{ activated_count: number }>('/admin/subscription-delivery/activate', { method: 'POST', body: JSON.stringify({ items }) }, token)
+  },
+  exportSubscriptionDeliveryPdfs(token: string, items: { key: string; recipient_user_id?: string }[]) {
+    return download('/admin/subscription-delivery/export-pdf', { method: 'POST', body: JSON.stringify({ items }) }, token)
   },
 }
 
@@ -258,6 +357,7 @@ async function download(path: string, init: RequestInit, token: string, includeJ
     blob: await response.blob(),
     filename: response.headers.get('Content-Disposition')?.match(/filename="?([^";]+)"?/)?.[1] || 'download.xlsx',
     count: response.headers.get('X-Pre-Registration-Count'),
+    subscriptionKeyCount: response.headers.get('X-Subscription-Key-Count'),
   }
 }
 

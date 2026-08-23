@@ -31,7 +31,7 @@ services:
   api:
     build:
       context: ./backend
-      target: development
+      target: production
       args:
         PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.13-slim}
     env_file: .env
@@ -39,10 +39,9 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
     volumes:
-      - ./backend:/app
       - ./storage:/app/storage
     command: >-
-      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,6 +51,10 @@ services:
       # Keep the development API available only from the local host.
       # Public traffic must enter through Nginx.
       - "127.0.0.1:${API_PORT:-8000}:8000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 10s
@@ -61,20 +64,17 @@ services:
   web:
     build:
       context: ./frontend
-      target: development
+      target: production
       args:
         NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:22-alpine}
-    environment:
-      VITE_DEV_API_PROXY_TARGET: http://api:8000
-    volumes:
-      - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
-    command: npm run dev -- --host 0.0.0.0
+        NGINX_BASE_IMAGE: ${NGINX_IMAGE:-nginx:1.27-alpine}
     depends_on:
       api:
         condition: service_healthy
     expose:
       - "5173"
+    security_opt:
+      - no-new-privileges:true
 
   nginx:
     image: ${NGINX_IMAGE:-nginx:1.27-alpine}
@@ -88,9 +88,10 @@ services:
     ports:
       # WEB_PORT is selected during `scripts/manage.sh init` on Debian.
       - "${WEB_PORT:-80}:80"
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
-  frontend_node_modules:

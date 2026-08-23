@@ -1,0 +1,24 @@
+# Local development override. The base compose file intentionally uses hardened
+# production targets; opt into hot reload only on a trusted developer machine.
+services:
+  api:
+    build:
+      target: development
+    volumes:
+      - ./backend:/app
+      - ./storage:/app/storage
+    command: >-
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  web:
+    build:
+      target: development
+    environment:
+      VITE_DEV_API_PROXY_TARGET: http://api:8000
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+
+volumes:
+  frontend_node_modules:

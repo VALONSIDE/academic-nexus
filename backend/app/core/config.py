@@ -17,9 +17,12 @@ class Settings(BaseSettings):
 
     app_name: str = "AcademicNexus"
     app_env: str = "development"
+    # Public deployments must opt in explicitly only where the API schema is
+    # intentionally exposed. The local example enables this for development.
+    api_docs_enabled: bool = False
     # Product release label shown by OpenAPI and operational tooling.
     # NR means Not Released / 尚未发布.
-    app_version: str = "alpha-0822-NR"
+    app_version: str = "alpha-0823-NR"
     database_url: str = "postgresql+psycopg://academicnexus:academicnexus@localhost:5432/academicnexus"
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret_key: str
@@ -34,9 +37,14 @@ class Settings(BaseSettings):
     minimax_api_key: str = ""
     minimax_base_url: str = "https://api.minimaxi.com/anthropic"
     minimax_model: str = "MiniMax-M3"
+    minimax_light_model: str = "MiniMax-M2.5-highspeed"
+    minimax_standard_model: str = "MiniMax-M2.7"
+    minimax_expert_model: str = "MiniMax-M3"
     ai_daily_project_limit: int = 500
-    ai_default_daily_user_limit: int = 20
-    ai_default_credit_balance: int = 100
+    # Legacy-named quota columns are synchronized to the subscription-cycle
+    # allowance. Every account starts with ten normal-plan credits per cycle.
+    ai_default_daily_user_limit: int = 10
+    ai_default_credit_balance: int = 10
     ai_context_message_limit: int = 16
     ai_context_character_limit: int = 24000
     ai_max_output_tokens: int = 1200

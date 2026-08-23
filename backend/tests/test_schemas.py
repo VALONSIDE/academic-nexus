@@ -13,6 +13,8 @@ def test_activation_requires_a_strong_password() -> None:
             academic_id="20240001",
             access_key="1234-ABCD-5678-9012",
             password="onlylowercase12",
+            terms_accepted=True,
+            privacy_accepted=True,
         )
 
 
@@ -23,6 +25,8 @@ def test_activation_accepts_a_valid_receipt_shape() -> None:
         academic_id="20240001",
         access_key="1234-abcd-5678-9012",
         password="AcademicNexus2026",
+        terms_accepted=True,
+        privacy_accepted=True,
     )
     assert request.username == "CUC_S20240001"
     assert request.access_key == "1234-ABCD-5678-9012"

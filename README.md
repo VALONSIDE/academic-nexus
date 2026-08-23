@@ -1,486 +1,377 @@
-<div align="center">
+# 智导未来 · AcademicNexus
 
-# 🎓 智导未来 · AcademicNexus
+> 面向合作院校的 AI 驱动学术发展、师生互动与订阅权益平台。<br>
+> An AI-enabled academic development, engagement, and subscription platform for partner institutions.
 
-### 面向合作高校的 AI 学术发展与导师双向选择平台
+[![Release](https://img.shields.io/badge/release-alpha--0823--NR-0f172a?style=flat-square)](#更新日志--changelog)
+[![Docker](https://img.shields.io/badge/runtime-Docker%20Compose-2496ed?style=flat-square&logo=docker&logoColor=white)](#本地启动--local-start)
+[![Vue](https://img.shields.io/badge/web-Vue%203-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](#技术架构--architecture)
+[![FastAPI](https://img.shields.io/badge/api-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](#技术架构--architecture)
 
-**AI-powered academic growth, resource recommendation, and mutual mentor matching for partner universities.**
+当前版本为 **`alpha-0823-NR`**。`NR` 表示 *Not Released*：这是本地验证版本，未经明确授权不得提交、推送或部署到生产环境。
 
-[![版本](https://img.shields.io/badge/版本-alpha--0822--NR-0f172a?style=for-the-badge)](#release-status)
-[![Docker First](https://img.shields.io/badge/Docker-First-2496ED?style=for-the-badge&logo=docker&logoColor=white)](#快速开始-debian)
-[![Vue 3](https://img.shields.io/badge/Vue-3-42b883?style=for-the-badge&logo=vuedotjs&logoColor=white)](#系统架构)
-[![FastAPI](https://img.shields.io/badge/FastAPI-Python-009688?style=for-the-badge&logo=fastapi&logoColor=white)](#系统架构)
+## 项目概览 · Overview
 
-[中文主文档](#zh-cn) · [English Guide](#english-guide) · [快速开始](#quick-start) · [接口总览](#api-map) · [安全说明](#security)
+智导未来服务于合作院校中的学生、教师和管理人员。平台以结构化学术画像为基础，提供师生匹配、双向选择、学习资源、AI 学术助手，以及与院校绑定的订阅权益管理。
 
-</div>
+AcademicNexus combines structured academic profiles, explainable matching, mutual selection, learning resources, an AI academic assistant, and institution-bound subscription entitlements.
 
-> [!IMPORTANT]
-> **当前版本：`alpha-0822-NR`**
-> `NR` = **Not Released / 尚未发布**。该版本仅用于受控 Alpha 验证，尚不应直接作为生产环境对外开放。
+### 核心能力 · Core capabilities
 
----
+| 模块 | 已实现能力 |
+| --- | --- |
+| 身份与账户 | Excel 预注册、一次性 Access Key 激活、Argon2id 密码保护、登录、密码修改、令牌失效控制与中英语言偏好。 |
+| 学术画像 | 学生与教师分别维护研究兴趣、能力、目标与学术经历；完成画像后才能进入对应业务流程。 |
+| 师生互动 | 学生匹配教师、教师匹配学生、可解释的画像评分、师生双向选择与名额控制。 |
+| 学习资源 | 教师上传课程、论文、书籍和附件；学生获得检索与画像关联推荐；资源配额由管理端控制。 |
+| AI 学术助手 | 持久化多轮对话、每账户最多 100 条会话、自动命名/可改名、日期显示、Markdown 安全渲染、流式与普通模式、轻量/标准/专家模型档位。 |
+| 订阅权益 | 基础、Pro、Ultra、Max 四档订阅周期与额度；院校配额、批量签发 Key、Excel 回执、回收未使用 Key 和院校绑定验证。 |
+| 离线派发 | 管理员导入本地 Key 回执后在线核验；可直接激活符合条件的用户，或导出中英双语、机读卡风格 PDF 通知单。 |
+| 管理与合规 | 超级管理员与院校管理员分级权限、院校范围隔离、关于页面、条款、隐私、AI 使用和可接受使用等合规页面。 |
 
-<a id="zh-cn"></a>
-
-# 中文主文档
-
-## 项目定位
-
-智导未来（AcademicNexus）服务于合作高校的学生、导师与管理员，以统一的学术画像为基础，提供导师匹配、师生双向选择、学习资源推荐和 AI 学术咨询能力。
-
-系统不提供面向公众的自由注册。高校通过管理员导入的 Excel 模板预录入师生身份；学生和导师仅能使用本人回执中的四项信息激活账户。学校中文全称与学院中文全称贯穿导入、画像、匹配、双选和管理后台。
-
-## 已实现模块
-
-| 模块 | 已实现能力 | 关键实现 |
-| --- | --- | --- |
-| 用户与预注册 | Excel 模板下载、批量导入、合规校验、回执生成、一次性 Access Key 激活、登录与改密 | 账户名由学校简称、角色与学工号自动生成；例如 `CUC_S20240001`、`CUC_TT10086`。 |
-| 学术画像 | 学生与导师分角色的必填画像填写、查看与更新 | 标签字段使用 JSON 存储，保留后续向量化/语义检索扩展空间。 |
-| 导师匹配 | 全校同校候选池、本学院优先、可解释画像混合评分 | 当前算法版本 `profile-hybrid-v1`，返回分项得分与共同关键词。 |
-| 师生双向选择 | 学生表达意向、导师主动邀请、确认、拒绝、撤销、名额与特例控制 | 数据库锁与事务防止并发超额、同一学生被重复确认。 |
-| 学习资源 | 课程、论文、书籍的浏览、推荐、上传、下载与导师存储额度 | 资源以主题和标签匹配学生画像，导师资源总量可由管理员调整。 |
-| AI 学术助手 | 多轮对话、会话历史、上下文、MiniMax 接入、AI 选导师咨询 | 调用前原子预占配额；上游调用失败时自动返还次数与余额。 |
-| 管理后台 | 预注册账户、学生/导师账户、密码、AI 配额、资源配额、双选设置与记录管理 | 支持批量状态调整、删除未激活预注册、设置个人例外规则。 |
-
-## 核心业务流程
-
-### 1. 合作院校预注册与账户激活
+## 技术架构 · Architecture
 
 ```mermaid
 flowchart LR
-    A[管理员下载 Excel 模板] --> B[合作院校填写师生信息]
-    B --> C[管理员上传并通过校验]
-    C --> D[系统生成账户与 Access Key 回执]
-    D --> E[受控渠道发放个人回执]
-    E --> F[用户验证四项信息并设置密码]
-    F --> G[填写对应角色的学术画像]
-    G --> H[账户激活并可登录]
+  U[Student / Mentor / Administrator] --> N[Nginx]
+  N --> W[Vue 3 + TypeScript + shadcn-style UI]
+  N --> A[FastAPI]
+  A --> P[(PostgreSQL + pgvector)]
+  A --> R[(Redis)]
+  A --> S[Private resource storage]
+  A --> M[MiniMax API]
 ```
 
-导入模板固定包含以下列：
-
-| 列 | 规则 |
+| 层级 | 技术 |
 | --- | --- |
-| 学校英文简称 | 2–12 位字母或数字，用于生成不可修改的账户名。 |
-| 学校中文全称 | 必填，长度 2–160。 |
-| 学院中文全称 | 必填，长度 2–160。 |
-| 用户类型 | 支持 `student` / `mentor`、`S` / `T`、`学生` / `导师`。 |
-| 中文真实姓名 | 必填，长度 2–120。 |
-| 学工号 | 必填；以文本处理，保留前导零；支持字母、数字、下划线和连字符。 |
+| Web | Vue 3、TypeScript、Vite、Tailwind、Reka UI、DOMPurify、vue-i18n。 |
+| API | FastAPI、SQLAlchemy、Pydantic、Alembic、PyJWT、pwdlib/Argon2id。 |
+| 数据与运行 | PostgreSQL + pgvector、Redis、Docker Compose、Nginx。 |
+| 文档与导出 | openpyxl、ReportLab、PDF/ZIP 和 XLSX 内存流。 |
 
-系统会校验表头、工作表名称、空行、格式、同一文件内账户重复，以及与已导入/已激活账户的冲突。导入成功后回执仅在该次下载中提供 Access Key 明文。
+## 角色与权限 · Roles and access
 
-Access Key 格式为 `XXXX-ABCD-XXXX-XXXX`：12 位随机数字与 4 位随机大写字母，由密码学安全随机数生成器生成。数据库只保存 Key 的密码哈希及带服务端 Pepper 的 HMAC 指纹；指纹具备全局唯一约束。激活完成后 Key 状态变为已激活，无法再次使用。
-
-### 2. 学术画像
-
-学生完成画像时必须填写：研究兴趣、技能、成绩与学业表现、学术目标、科研经历。
-
-导师完成画像时必须填写：研究方向、代表论文、科研项目、培养风格。
-
-每个画像都关联到用户预注册时确定的学校与学院。画像完成状态由 `profile_completed_at` 记录；注册第二步未完成前，账户不可正常进入业务功能。
-
-### 3. 可解释导师匹配
-
-当前匹配服务以显式标签和文本信号实现稳定、可审阅的冷启动匹配，不把稀疏 Alpha 数据伪装成已训练模型。
-
-候选对象必须同时满足：账户启用、角色正确、画像已完成、与当前用户属于同一所学校。排序顺序为：
-
-1. 同一学院的候选人优先；
-2. 再按画像混合分数从高到低；
-3. 姓名与账户名作为稳定的最终排序键。
-
-匹配总分为 0–100，计算方式如下：
-
-| 维度 | 权重 | 比较内容 |
-| --- | ---: | --- |
-| 研究契合度 | 70% | 学生研究兴趣与导师研究方向。 |
-| 技能契合度 | 15% | 学生技能与导师研究方向、项目、代表论文。 |
-| 发展契合度 | 15% | 学生目标/科研经历与导师项目/培养风格。 |
-
-API 同时返回每个维度的得分和命中的共同术语。后续接入嵌入模型与向量数据库时，将在既有 `matching` 服务边界内替换或融合排序器，而不改变前端与双选状态机的接口。
-
-### 4. 师生双向选择状态机
-
-学生可对导师发起意向；导师可对学生发出邀请。双方操作会落入同一条选择记录，状态包含：
-
-```text
-pending_student  学生已选择，等待导师确认
-pending_mentor   导师已邀请，等待学生接受
-confirmed        双方确认完成
-rejected         导师拒绝
-cancelled        学生撤销、确认其他导师或管理员释放
-```
-
-实现保障：
-
-- 学生确认任一导师后，系统会在同一事务内取消该学生其他未完成选择；
-- 导师容量会同时计入已确认人数和待学生响应的邀请；
-- 选择设置、用户记录和确认过程使用行锁，避免多标签页或并发请求造成超额；
-- 管理员可配置全局开关、默认导师容量、默认学生选择数；
-- 管理员还可对单个学生/导师设置容量、选择上限、`first_come` 模式及不受限特例；
-- 管理员可检索记录并单条或批量释放已选关系。
-
-### 5. 学习资源与推荐
-
-资源基础表统一保存标题、说明、主题、标签、发布状态、外部链接或本地文件信息；具体类型通过一对一扩展表保存特有元数据：
-
-| 类型 | 专有信息 |
+| 角色 | 权限边界 |
 | --- | --- |
-| 课程 `course` | 提供方、级别、时长。 |
-| 论文 `paper` | 作者、刊物、DOI、年份。 |
-| 书籍 `book` | 作者、出版社、ISBN、年份。 |
+| 学生 / 教师 | 使用自身画像、匹配、选择、资源、AI 助手和订阅页面。被指派为院校管理员后，仍可按学生/教师入口使用原有功能。 |
+| 院校管理员 | 仅管理被分配院校内的学生、教师、订阅配额、Key 和离线派发流程。 |
+| 超级管理员 | 管理全部院校、管理员指派、院校订阅配额及跨院校账户。 |
 
-导师可管理自己创建的资源与文件；默认总存储额度为 200 MB，可由管理员对单人调整。学生可以浏览全部已发布资源，并按研究兴趣与技能获得推荐列表。
+前后端都会执行角色和院校范围校验；界面隐藏不构成授权，所有敏感操作必须通过服务端验证。
 
-### 6. AI 学术助手与配额
+## 订阅与 Key 规则 · Subscription model
 
-MiniMax API 只通过 `MINIMAX_API_KEY` 环境变量读取，绝不写入前端或版本控制。当前对话主题包括：
+- 基础订阅：每个普通订阅周期 10 次 AI 额度。
+- 高级订阅：Pro 为 50 次、Ultra 为 100 次、Max 为 200 次；高级订阅从激活日开始，到下一订阅日结束。
+- 高级订阅结束时自动回落基础订阅，并在新的基础周期重置 10 次额度。
+- 高级订阅期间不能改为其他高级档位或主动降为基础订阅。
+- Subscription Key 格式为 `XX-X-XXXX-XXX`；服务端仅保存受 Pepper 保护的指纹和 Argon2id 校验值，不保存明文。
+- Key 与院校强绑定。已激活 Key 永久失效；未激活 Key 可以回收并返还院校库存，回收后不可再次使用。
+- Excel 回执、PDF 通知单和 Key 校验均采用内存流处理，不会把明文 Key 写入服务器存储。下载型响应设为 `no-store`，并对表格导出应用公式注入防护。
 
-- 学术规划 `academic_planning`
-- 导师咨询 `mentor_consultation`
-- 学习路线 `learning_roadmap`
-- 双选顾问 `selection_advisor`
+## 本地启动 · Local start
 
-会话、消息、上下文摘要和使用事件均持久化。上下文长度分别受到消息条数和字符数上限控制。AI 配额以 Asia/Shanghai 自然日计量：个人每日上限、个人余额、项目每日总上限共同生效；项目默认上限为 `500`，仅可通过服务端环境配置改变。管理员可调整个人计划、余额、个人日上限及当日用量，但不能通过后台突破项目级环境上限。
+### 前置条件
 
-## 系统架构
+- Docker Desktop / Docker Engine with Compose v2
+- Node.js 22（仅在宿主机执行前端检查时需要）
+- 真实的 MiniMax API Key 仅放入私有 `.env`；未配置时 AI 接口会明确返回不可用，不会扣减额度。
 
-```mermaid
-flowchart LR
-    U[学生 · 导师 · 管理员浏览器] --> N[Nginx / WEB_PORT]
-    N --> W[Vue 3 + TypeScript + Vite + shadcn/ui]
-    N --> A[FastAPI REST API]
-    A --> P[(PostgreSQL + pgvector)]
-    A --> R[(Redis)]
-    A --> S[私有资源文件存储]
-    A --> M[MiniMax API]
+### 配置
+
+```powershell
+Copy-Item .env.example .env
 ```
 
-| 层级 | 技术与职责 |
-| --- | --- |
-| 前端 | Vue 3、TypeScript、Vite、shadcn/ui；提供中文/英文切换、分角色工作台。 |
-| 反向代理 | Nginx 对外承载 Web 端，并反向代理 API 请求。 |
-| 后端 | FastAPI、SQLAlchemy、Pydantic；按认证、画像、匹配、双选、资源、AI 等领域模块化。 |
-| 数据 | PostgreSQL 16 + pgvector 保存事务数据与未来向量能力；Redis 预留缓存/会话能力。 |
-| 迁移 | Alembic 管理结构迁移，容器启动时执行 `alembic upgrade head`。 |
-| 部署 | Docker Compose 编排 postgres、redis、api、web、nginx 五个服务。 |
+在 `.env` 中将每一个 `CHANGE_ME` 替换为独立的随机密值。不要把 `.env`、Key 回执、导出文件或用户数据纳入 Git。
 
-## 数据模型
+### 运行
 
-| 领域 | 主要表 |
-| --- | --- |
-| 租户与身份 | `tenants`、`users`、`roles`、`user_roles`。 |
-| 预注册 | `pre_registration_batches`、`pre_registrations`。 |
-| 学术画像 | `student_profiles`、`mentor_profiles`。 |
-| 导师双选 | `selection_settings`、`student_selection_settings`、`mentor_selection_settings`、`mentor_selections`。 |
-| 学习资源 | `resources`、`courses`、`papers`、`books`、`mentor_resource_quotas`。 |
-| AI | `ai_conversations`、`ai_messages`、`ai_user_quotas`、`ai_user_daily_usage`、`ai_project_daily_usage`、`ai_usage_events`。 |
-
-数据库使用 UUID 主键，并以外键、唯一约束、检查约束和索引维持角色、租户、激活码、资源类型与双选关系的完整性。
-
-<a id="api-map"></a>
-
-## 接口总览
-
-所有业务接口位于 `/api/v1`；交互式接口文档可通过 `http://<host>:<API_PORT>/docs` 在服务器本机访问。
-
-| 接口分组 | 路径前缀 | 主要能力 |
-| --- | --- | --- |
-| 身份认证 | `/auth` | 激活预注册账户、登录、当前用户、语言偏好、修改密码。 |
-| 学术画像 | `/profiles` | 完成激活画像、读取与更新学生/导师画像。 |
-| 数据概览 | `/dashboard` | 按当前角色返回看板统计、消息与待办数据。 |
-| 管理用户 | `/admin/users` | 查询、编辑、批量启停学生/导师与重置密码。 |
-| 预注册管理 | `/admin/pre-registrations` | 模板、导入、查询、删除与批量删除未激活账户。 |
-| 匹配 | `/matching` | 学生查导师、导师查学生，含画像评分明细。 |
-| 双向选择 | `/selection`、`/admin/selection` | 意向、邀请、确认、拒绝、撤销、设置、记录与释放。 |
-| 学习资源 | `/resources`、`/mentor/resources`、`/admin/resource-quotas` | 浏览、推荐、上传、下载、资源与额度管理。 |
-| AI 助手 | `/ai`、`/admin/ai` | 会话、消息、个人配额与管理员配额管理。 |
-
-<a id="quick-start"></a>
-
-## 快速开始（Debian）
-
-项目提供 [scripts/manage.sh](scripts/manage.sh) 作为 Alpha 生命周期管理脚本。它会在 Debian 上安装 Docker 依赖、引导创建本地密钥，并管理项目启动、停止和清理。
-
-```bash
-git clone <YOUR_GITHUB_REPOSITORY_URL> academicnexus
-cd academicnexus
-chmod +x scripts/manage.sh
-
-# 0. 安装 Docker Engine、Buildx 与 Docker Compose 插件（仅 Debian）
-./scripts/manage.sh install
-
-# 1. 交互式输入 HTTP 端口、管理员信息和可选的 MiniMax API Key，然后启动
-./scripts/manage.sh init
-```
-
-`init` 会生成权限为 `600` 的 `.env`，自动产生 PostgreSQL 密码、JWT 签名密钥与 Access Key Pepper；脚本不会打印这些随机密钥。启动后访问：
-
-```text
-http://<服务器 IP>:<初始化时选择的端口>
-```
-
-### 中国大陆网络下的 Docker 软件源备用配置
-
-若服务器无法连接 `download.docker.com`，但运行在阿里云 ECS VPC 网络中，可在安装时临时改用阿里云 Docker CE 镜像；软件包仍会由 Docker GPG Key 验签：
-
-```bash
-DOCKER_APT_REPOSITORY=http://mirrors.cloud.aliyuncs.com/docker-ce/linux/debian \
-  ./scripts/manage.sh install
-```
-
-该变量只影响 Docker 安装软件源，不会写入项目 `.env`。阿里云镜像站当前提供 Debian `trixie` 的 Docker CE 索引；优先使用官方源，只有官方 CDN 网络不可达时才使用此备用方式。
-
-### Docker Hub 无法拉取时的 ACR 私有镜像方案
-
-ACR 个人镜像加速器可能没有同步所需的固定标签；此时不要依赖不明第三方镜像站。推荐在同地域 ACR 企业版实例中使用“制品订阅”同步以下 Docker Hub 镜像，并在订阅完成后填写私有仓库地址：
-
-| Docker Hub 源镜像 | 项目变量 |
-| --- | --- |
-| `pgvector/pgvector:pg16` | `POSTGRES_IMAGE` |
-| `redis:7.4-alpine` | `REDIS_IMAGE` |
-| `nginx:1.27-alpine` | `NGINX_IMAGE` |
-| `python:3.13-slim` | `PYTHON_BASE_IMAGE` |
-| `node:22-alpine` | `NODE_BASE_IMAGE` |
-
-例如，若所有镜像已同步到 ACR，先登录你的 ACR 域名，再在私有 `.env` 中填写实际仓库路径：
-
-```bash
-docker login <你的 ACR 域名>
-nano .env
-```
-
-```dotenv
-POSTGRES_IMAGE=<你的 ACR 域名>/academicnexus/pgvector:pg16
-REDIS_IMAGE=<你的 ACR 域名>/academicnexus/redis:7.4-alpine
-NGINX_IMAGE=<你的 ACR 域名>/academicnexus/nginx:1.27-alpine
-PYTHON_BASE_IMAGE=<你的 ACR 域名>/academicnexus/python:3.13-slim
-NODE_BASE_IMAGE=<你的 ACR 域名>/academicnexus/node:22-alpine
-```
-
-随后执行 `./scripts/manage.sh start`。这些变量均有 Docker Hub 默认值，因此在网络正常的开发环境无需设置。
-
-### 日常运维命令
-
-| 命令 | 作用 |
-| --- | --- |
-| `./scripts/manage.sh start` | 构建（如需要）并启动所有服务。 |
-| `./scripts/manage.sh stop` | 停止服务，保留数据库和资源。 |
-| `./scripts/manage.sh restart` | 停止后重新启动。 |
-| `./scripts/manage.sh status` | 显示服务状态。 |
-| `./scripts/manage.sh logs` | 持续查看最近服务日志。 |
-| `./scripts/manage.sh destroy` | 输入 `DESTROY` 后删除项目容器、卷、上传资源和 `.env` 密钥；保留源码、Git 历史和不相关 Docker 资源。 |
-
-> [!TIP]
-> 初次执行 `install` 后，请重新登录系统或运行 `newgrp docker`，以便不使用 `sudo` 调用 Docker。
-
-### 本地开发
-
-```bash
-cp .env.example .env
-# 使用独立的随机值替换每个 CHANGE_ME；绝不可提交 .env。
+```powershell
 docker compose up --build
 ```
 
-对外入口由 Nginx 使用 `WEB_PORT` 提供；开发 API 端口使用 `127.0.0.1:${API_PORT}` 绑定，仅可从服务器本机访问。
+默认入口为 `http://localhost:8080`，API 仅绑定 `127.0.0.1:8000`。开发热更新使用显式覆盖文件：
 
-## 配置项
-
-| 环境变量 | 说明 | 是否敏感 |
-| --- | --- | --- |
-| `WEB_PORT` / `API_PORT` | Nginx 对外端口与本机 API 调试端口。 | 否 |
-| `POSTGRES_PASSWORD` | PostgreSQL 数据库密码。 | 是 |
-| `JWT_SECRET_KEY` | 登录令牌签名密钥。 | 是 |
-| `ACCESS_KEY_PEPPER` | Access Key HMAC 指纹服务端 Pepper。 | 是 |
-| `INITIAL_ADMIN_*` | 首次启动时创建的管理员资料。 | 密码敏感 |
-| `MINIMAX_API_KEY` | MiniMax 服务端 API Key；留空则 AI 功能返回未配置状态。 | 是 |
-| `AI_DAILY_PROJECT_LIMIT` | 项目每日 AI 调用硬上限，默认 `500`。 | 运维配置 |
-| `RESOURCE_MAX_UPLOAD_MB` | 单资源最大上传大小。 | 否 |
-| `MENTOR_RESOURCE_DEFAULT_QUOTA_MB` | 新导师默认总资源空间，默认 `200`。 | 否 |
-
-请仅以 [.env.example](.env.example) 作为配置模板。真实 `.env` 被 Git 忽略，不应通过聊天、截图、Issue 或提交记录传播。
-
-<a id="security"></a>
-
-## 安全与隐私
-
-- `.gitignore` 已排除 `.env`、私钥格式、本地密钥目录、导入回执、上传资源、运行数据、旧版原型与内部策划资料；
-- 管理员不存在仓库内置默认密码，首次管理员仅从私有环境变量创建；
-- 用户密码和 Access Key 均只保留验证所需的受保护值，不保存 Access Key 明文；
-- Nginx 为唯一公开入口；开发 API 仅监听本机回环地址；
-- CORS 来源明确配置；AI 调用次数在数据库事务中预占并审计；
-- `destroy` 仅清除精确的项目容器、卷、资源目录与 `.env`，不会清除 Docker 或其他项目。
-
-推送 GitHub 前可执行：
-
-```bash
-git status --ignored
-git check-ignore -v .env OLD_TSS_docker_oneclick "智导未来——AI驱动的学术发展与教学互动平台.pdf" "MiniMax文档.md"
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-## 开发与验证
-
-容器环境中的验证命令：
+Debian 服务器上的首次初始化请使用交互脚本：
 
 ```bash
-# 后端：安全、预注册、注册流程、画像、匹配、双选、资源、AI 配额等测试
+chmod +x scripts/manage.sh
+./scripts/manage.sh install
+./scripts/manage.sh init
+```
+
+## 验证 · Verification
+
+```powershell
+# 后端：在已启动的 API 容器中运行
 docker compose exec -T api pytest -q
 
-# 前端：TypeScript 类型检查与 Vite 生产构建
-docker compose exec -T web npm run build
+# 前端：在 frontend 目录中运行
+npm run test:run
+npm run build
+
+# Compose 配置检查
+docker compose config -q
+
+# 忽略规则与空白检查
+git check-ignore -v .env storage/resources output
+git diff --check
 ```
 
-新增数据库结构时，使用 Alembic 创建迁移并在干净数据库中验证升级；不要直接在生产服务器修改代码或手工变更表结构。
+自动化测试覆盖账户激活、密码安全、Access Key、Excel 导入安全、师生匹配与选择、资源配额、AI 对话与额度、订阅周期、院校管理员范围、离线 Key 校验、PDF 导出和直接激活。
 
-## 目录结构
+## 安全边界 · Security boundaries
 
-```text
-academicnexus/
-├── backend/                 # FastAPI 领域服务、模型、Alembic 迁移和测试
-├── frontend/                # Vue 3 双语 Web 应用与 shadcn/ui 组件
-├── infra/nginx/             # Nginx 反向代理配置
-├── scripts/manage.sh        # Debian 安装与 Alpha 生命周期脚本
-├── docs/                    # 阶段设计文档
-├── storage/                 # 运行时资源挂载点（仅保留 .gitkeep）
-├── docker-compose.yml       # Docker First 服务编排
-└── .env.example             # 安全的环境变量模板
+- 密码使用 Argon2id；未知账户/Key 使用伪哈希校验，减少时间侧信道泄露。
+- JWT 包含认证版本；改密、重置或停用账户后，旧令牌即时失效。
+- Access Key 与 Subscription Key 采用密码学安全随机数、全局唯一的 HMAC 指纹、一次性状态机与事务锁。
+- Nginx 仅暴露 Web 入口；API 端口绑定回环地址。登录、激活、订阅 Key 激活、导入与 AI 消息都有限流。
+- AI 流式响应关闭代理缓冲，以保证增量输出；回答完成前后均以事务方式处理配额，失败会回滚预占。
+- CSP、防嵌入、MIME 嗅探防护、权限策略、DOMPurify 和受限 Markdown 渲染共同降低 Web 注入风险。
+- XLSX 导入在解压前限制条目数和解压大小；资源上传限制扩展名、大小、存储根目录和路径穿越。
+
+> [!WARNING]
+> 当前 Alpha 默认使用 HTTP，仅适合受控测试。外网正式上线前必须配置域名、TLS/HTTPS、生产 CORS 白名单、备份与恢复演练、监控告警、独立日志保留策略和安全评估。
+
+## 数据清理 · Runtime reset
+
+仅清空项目运行数据而保留 `.env` 配置：
+
+```powershell
+docker compose down --volumes --remove-orphans
 ```
 
-<a id="release-status"></a>
+`scripts/manage.sh destroy` 会额外删除该项目的 `.env` 私有密钥和上传资源，执行前要求输入 `DESTROY`。它不会删除源代码、Git 历史或无关 Docker 资源。
 
-## 版本状态
+## 仓库卫生 · Repository hygiene
 
-| 版本 | 状态 | 说明 |
-| --- | --- | --- |
-| `alpha-0822-NR` | 内部 Alpha / 未发布 | 当前版本；用于合作院校前期验证。 |
+`.gitignore` 排除私有配置、密钥、上传文件、运行卷数据、导入/导出回执、PDF 输出、临时渲染、测试报告、构建产物、旧项目和内部材料。提交前至少执行：
 
-后续所有尚未发布版本均使用 `-NR` 后缀。下一阶段将聚焦生产域名与 TLS、可观测性、向量检索、数据治理和 Beta 上线加固。
+```powershell
+git status --short
+git diff --check
+git diff --cached --name-only
+```
+
+未经项目负责人的明确命令，**不得执行 `git commit` 或 `git push`**。
+
+## 更新日志 · Changelog
+
+### alpha-0823-NR — 2026-08-23
+
+- 完成院校订阅体系：基础 / Pro / Ultra / Max 周期额度、院校库存、批量 Key 签发、回收和院校绑定验证。
+- 建立超级管理员与院校管理员的服务端范围隔离，并新增院校管理员指派和院校中心化管理界面。
+- 新增离线 Key 派发：Excel 导入核验、直接激活、通用或指定对象 PDF 通知单、ZIP 导出与中英双语机读卡版式。
+- 完善 AI 助手：100 条会话上限、删除/命名/日期、模型深度、普通/流式模式、流式滚动体验与订阅周期配额展示。
+- 修复 AI 配额响应遗漏订阅周期字段造成的首次加载和流式完成失败；流式连接异常时会恢复已持久化的问答，而不清空回答。
+- 增加关于页面、版权归属、法律与合规内容、全局中英适配与管理员身份标签。
+- 加固安全：订阅 Key 激活网关限流、AI SSE 代理禁缓冲、Excel 回执公式注入防护、私有输出/临时目录忽略规则和运行数据清理流程。
+- 完成本地运行数据重置与项目收尾审计；本次版本保持未发布状态。
+
+### alpha-0822-NR — 2026-08-22
+
+- 建立预注册激活、学术画像、匹配、双向选择、资源库、基础 AI 助手、Docker 部署与双语界面基础能力。
+
+## 相关文档 · Project documents
+
+- [第一阶段：用户与账户系统](docs/phase1-user-system.md)
+- [第二阶段：学术画像](docs/phase2-academic-portraits.md)
+- [第三阶段：订阅与院校管理员](docs/phase3-subscriptions-and-institution-admins.md)
+- [第三阶段：离线订阅派发](docs/phase3-offline-subscription-delivery.md)
 
 ---
 
-<a id="english-guide"></a>
+**智导未来 · AcademicNexus**<br>
+`alpha-0823-NR` · Internal Alpha · Not Released
 
-# English Guide
+---
+
+# English Version
+
+## AcademicNexus
+
+> AI-enabled academic development, student–mentor engagement, and subscription entitlements for partner institutions.
+
+**Current release:** `alpha-0823-NR` — *Not Released*. This is an internal Alpha verification build. Do not commit, push, or deploy it without the project owner's explicit authorization.
 
 ## Overview
 
-AcademicNexus is an AI-enabled academic development platform for partner universities. It connects pre-registered students and mentors through structured academic portraits, explainable matching, mutual selection, resource recommendations, and a quota-governed AI assistant.
+AcademicNexus serves students, mentors, institution administrators, and super administrators. It combines structured academic profiles with explainable matching, mutual selection, learning-resource management, an AI academic assistant, and institution-bound subscription entitlements.
 
-Public self-registration is intentionally unavailable. Partner institutions provide roster data through an administrator-managed Excel import. Institution and college names in Chinese are mandatory identity fields across import, profiles, matching, selection, and administration.
+### Delivered capabilities
 
-## Implementation at a glance
-
-| Area | Current implementation |
+| Area | Implementation |
 | --- | --- |
-| Identity | Validated Excel pre-registration, generated immutable username, one-time Access Key activation, role-based sign-in and password change. |
-| Portraits | Separate student and mentor portraits; JSON tag fields are ready to feed a future embedding/vector pipeline. |
-| Matching | `profile-hybrid-v1`; same institution is required, same college ranks first, then a transparent 70/15/15 hybrid score. |
-| Mutual selection | Intent, invitation, confirmation, rejection and cancellation, backed by transactional capacity and single-match guarantees. |
-| Resources | Course, paper and book catalog with tag-based recommendations, file download, and per-mentor storage quotas. |
-| AI | MiniMax server-side integration, persisted conversations, bounded context, user credits/daily limits and an environment-controlled project ceiling. |
-| Administration | Pre-registration, accounts, passwords, resource quota, AI quota, selection configuration, exceptions, records and batch actions. |
+| Identity and accounts | Excel pre-registration, one-time Access Key activation, Argon2id passwords, sign-in, password changes, token invalidation, and Chinese/English language preferences. |
+| Academic profiles | Separate student and mentor profiles for interests, skills, goals, and academic experience. Profile completion gates access to relevant workflows. |
+| Student–mentor engagement | Student-to-mentor and mentor-to-student matching, explainable profile scores, mutual selection, and capacity controls. |
+| Learning resources | Mentor-managed courses, papers, books, and attachments; student search and profile-informed recommendations; administrator-controlled storage quotas. |
+| AI academic assistant | Persisted multi-turn conversations, a 100-conversation limit per account, automatic and editable titles, dates, sanitized Markdown, streaming and standard responses, plus Light, Standard, and Expert model tiers. |
+| Subscriptions | Basic, Pro, Ultra, and Max entitlement cycles; institution inventory; batch Key issuance; Excel receipts; unused Key reclamation; and institution-bound redemption. |
+| Offline delivery | In-memory validation of imported Key receipts, direct activation for eligible users, and bilingual machine-card-style PDF notices for named or general delivery. |
+| Administration and compliance | Super-administrator and institution-administrator scopes, institution isolation, About content, and legal pages for terms, privacy, AI use, acceptable use, and related policies. |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    B[Student / Mentor / Admin browser] --> N[Nginx : WEB_PORT]
-    N --> F[Vue 3 + TypeScript + Vite + shadcn/ui]
-    N --> A[FastAPI REST API]
-    A --> D[(PostgreSQL + pgvector)]
-    A --> C[(Redis)]
-    A --> S[Private resource storage]
-    A --> L[MiniMax API]
+  U[Student / Mentor / Administrator] --> N[Nginx]
+  N --> W[Vue 3 + TypeScript + shadcn-style UI]
+  N --> A[FastAPI]
+  A --> P[(PostgreSQL + pgvector)]
+  A --> R[(Redis)]
+  A --> S[Private resource storage]
+  A --> M[MiniMax API]
 ```
 
-Docker Compose runs five services: `postgres`, `redis`, `api`, `web`, and `nginx`. Alembic migrations run before the FastAPI service starts. Nginx is the public application entry point; the development API port is bound to localhost only.
-
-## Key technical behaviour
-
-### Provisioning and activation
-
-The import template requires school abbreviation, full Chinese institution name, full Chinese college name, role, real name, and academic/employee ID. Roles accept `student`/`mentor`, `S`/`T`, and their Chinese equivalents. Usernames are generated as `<SCHOOL>_<S|T><ID>`.
-
-The returned receipt includes the username, real name, institution, college, academic ID, and one one-time Access Key. Keys follow `XXXX-ABCD-XXXX-XXXX`; the plaintext is issued only in the receipt. The database retains a password verifier plus a peppered HMAC fingerprint protected by a unique constraint. Successful activation invalidates the key.
-
-### Matching and selection consistency
-
-The score combines research alignment (70%), skills alignment (15%), and development alignment (15%). Each response includes matched terms and per-factor scores. Candidates must be active, have the expected role and a completed portrait, and belong to the same institution.
-
-The selection service uses row locks and transactions. A student cannot be confirmed with two mentors; confirmation cancels that student's remaining pending records. Mentor capacity includes confirmed pairs and outstanding invitations. Administrators can set tenant defaults and per-user limits, capacity, selection mode, and exemptions.
-
-### AI quota controls
-
-AI usage is accounted by the Asia/Shanghai calendar day. Before calling MiniMax, the service atomically reserves one user credit and one project call. Failed provider calls release the reservation. The user daily limit, user credit balance, and `AI_DAILY_PROJECT_LIMIT` must all permit the call. The project limit defaults to `500` and remains an environment-only operational control.
-
-## API map
-
-Every application endpoint is under `/api/v1`.
-
-| Prefix | Responsibility |
+| Layer | Technology |
 | --- | --- |
-| `/auth` | Activation, login, current user, locale and password management. |
-| `/profiles` | Student and mentor portrait completion and maintenance. |
-| `/dashboard` | Role-aware dashboard statistics and activity. |
-| `/admin/users` | Student/mentor account search, edit, batch status, and password reset. |
-| `/admin/pre-registrations` | Template download, import, list, and deletion of unactivated entries. |
-| `/matching` | Explainable mentor and student candidate lists. |
-| `/selection`, `/admin/selection` | Mutual selection actions, settings, exceptions, records, and release actions. |
-| `/resources`, `/mentor/resources`, `/admin/resource-quotas` | Library, recommendations, mentor uploads, downloads, and quota administration. |
-| `/ai`, `/admin/ai` | AI conversations, messages, quota snapshots, and quota administration. |
+| Web | Vue 3, TypeScript, Vite, Tailwind, Reka UI, DOMPurify, and vue-i18n. |
+| API | FastAPI, SQLAlchemy, Pydantic, Alembic, PyJWT, and pwdlib/Argon2id. |
+| Runtime | PostgreSQL + pgvector, Redis, Docker Compose, and Nginx. |
+| Documents | openpyxl, ReportLab, in-memory XLSX/PDF generation, and ZIP delivery. |
 
-Interactive OpenAPI documentation is available locally at `http://127.0.0.1:<API_PORT>/docs`.
+## Roles and access
 
-## Quick start on Debian
+| Role | Scope |
+| --- | --- |
+| Student / Mentor | Uses their own profile, matching, selection, resources, AI assistant, and subscription pages. An assigned institution administrator still retains the student or mentor experience. |
+| Institution administrator | Manages only users, subscription inventory, Keys, and offline delivery activities for assigned institutions. |
+| Super administrator | Manages all institutions, administrator assignments, institution subscription allocation, and cross-institution accounts. |
+
+The API enforces role and institution scope on every sensitive operation. Hiding a control in the user interface never grants authorization.
+
+## Subscription and Key model
+
+- Basic subscribers receive 10 AI credits in each normal subscription cycle.
+- Premium plans provide 50 credits for Pro, 100 for Ultra, and 200 for Max. A premium cycle starts when its Key is activated and ends on the corresponding subscription date in the following month.
+- At the end of a premium cycle, the account returns to Basic and starts a new 10-credit normal cycle.
+- A user with an active premium plan cannot switch to another premium plan or voluntarily downgrade to Basic.
+- Subscription Keys use the `XX-X-XXXX-XXX` format. The server retains only a Pepper-protected fingerprint and an Argon2id verifier, never plaintext.
+- A Key is bound to its institution. Activated Keys are permanently consumed; issued Keys can be reclaimed once, restoring institution inventory and permanently invalidating the Key.
+- Key receipts, delivery PDFs, and validation operate in memory. Download responses use `no-store`, and spreadsheet exports neutralize formula prefixes.
+
+## Local start
+
+### Prerequisites
+
+- Docker Desktop or Docker Engine with Compose v2
+- Node.js 22 only when running frontend checks on the host
+- A real MiniMax API Key stored exclusively in the private `.env` file. If it is absent, the AI endpoint reports that it is unavailable and does not deduct credits.
+
+### Configure
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Replace every `CHANGE_ME` value with a distinct randomly generated secret. Never add `.env`, Key receipts, generated exports, or user data to Git.
+
+### Run
+
+```powershell
+docker compose up --build
+```
+
+The default entry point is `http://localhost:8080`; the API is bound to `127.0.0.1:8000` only. Use the explicit development override for hot reload:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+For first-time setup on Debian:
 
 ```bash
-git clone <YOUR_GITHUB_REPOSITORY_URL> academicnexus
-cd academicnexus
 chmod +x scripts/manage.sh
 ./scripts/manage.sh install
 ./scripts/manage.sh init
 ```
 
-`init` asks for the public Alpha port, initial administrator account/password, and an optional MiniMax key. It creates a mode-`600` `.env`, generates independent PostgreSQL/JWT/Access-Key secrets, builds the stack, runs it, and never prints those secrets.
+## Verification
 
-If Docker's official repository is unreachable from an Alibaba Cloud ECS VPC, use the temporary trusted mirror override below. Package metadata remains verified by Docker's GPG key:
-
-```bash
-DOCKER_APT_REPOSITORY=http://mirrors.cloud.aliyuncs.com/docker-ce/linux/debian \
-  ./scripts/manage.sh install
-```
-
-| Command | Result |
-| --- | --- |
-| `./scripts/manage.sh start` | Build if needed and start the stack. |
-| `./scripts/manage.sh stop` | Stop services while retaining data. |
-| `./scripts/manage.sh restart` | Restart the project. |
-| `./scripts/manage.sh status` | Show service state. |
-| `./scripts/manage.sh logs` | Follow recent logs. |
-| `./scripts/manage.sh destroy` | After typing `DESTROY`, remove project containers, volumes, uploaded resources, and local `.env` secrets only. |
-
-For local development, copy `.env.example` to `.env`, replace every `CHANGE_ME` value with a distinct secret, then run `docker compose up --build`.
-
-## Security and quality checks
-
-Secrets, runtime data, receipts, uploads, the legacy prototype, and private planning materials are excluded by `.gitignore`. Never commit real API keys, passwords, private configuration, or exported receipt spreadsheets.
-
-```bash
+```powershell
+# Backend tests in a running API container
 docker compose exec -T api pytest -q
-docker compose exec -T web npm run build
+
+# Frontend checks from frontend/
+npm run test:run
+npm run build
+
+# Compose and repository checks
+docker compose config -q
+git check-ignore -v .env storage/resources output
+git diff --check
 ```
 
-Release label: **`alpha-0822-NR`**. `NR` means **Not Released** and is required for all unreleased versions.
+Automated coverage includes activation, password handling, Access Keys, secure Excel import/export, matching, mutual selection, resource quotas, AI conversations and credits, subscription cycles, administrator scope, offline Key validation, PDF export, and direct activation.
+
+## Security boundaries
+
+- Passwords use Argon2id. Unknown accounts and Keys run through a dummy verifier to reduce timing disclosure.
+- JWTs include an authentication version, so password changes, resets, and account suspension invalidate earlier tokens.
+- Access Keys and Subscription Keys use CSPRNG generation, globally unique HMAC fingerprints, one-time state transitions, and transactional locks.
+- Nginx is the sole public entry point. The API is loopback-bound; login, activation, Subscription Key activation, imports, and AI messages are rate-limited.
+- Nginx disables buffering for AI event streams. Quotas are reserved transactionally and released when upstream generation fails.
+- CSP, anti-framing headers, MIME-sniffing protection, a permissions policy, DOMPurify, and a constrained Markdown renderer reduce web-injection exposure.
+- XLSX imports have archive-entry and uncompressed-size limits. Resource uploads are restricted by extension, size, storage root, and path traversal checks.
+
+> [!WARNING]
+> The Alpha configuration uses HTTP and is suitable only for controlled testing. Public production launch requires a domain, TLS/HTTPS, a production CORS allowlist, backup/restore exercises, monitoring and alerting, log-retention controls, and a security assessment.
+
+## Runtime reset
+
+To remove project runtime data while retaining the private `.env` configuration:
+
+```powershell
+docker compose down --volumes --remove-orphans
+```
+
+`scripts/manage.sh destroy` additionally removes the project `.env` secrets and uploaded resources after a `DESTROY` confirmation. It preserves source code, Git history, and unrelated Docker resources.
+
+## Repository hygiene
+
+The `.gitignore` excludes private configuration, credentials, uploads, runtime data, Key receipts, PDF output, temporary rendering, test reports, build outputs, legacy material, and private project documents.
+
+Before a commit, run:
+
+```powershell
+git status --short
+git diff --check
+git diff --cached --name-only
+```
+
+Do not run `git commit` or `git push` without explicit project-owner authorization.
+
+## Changelog
+
+### alpha-0823-NR — 2026-08-23
+
+- Added the institution subscription system: Basic / Pro / Ultra / Max cycles, institution inventory, batch Key issuance, reclaiming, and institution binding.
+- Added server-enforced super-administrator and institution-administrator scopes, administrator assignment, and institution-centred administration views.
+- Added offline Key delivery: Excel validation, direct activation, named or general PDF notices, ZIP export, and bilingual machine-readable card styling.
+- Enhanced the AI assistant with the 100-conversation cap, deletion, naming, dates, model depth, response modes, scrolling conversation UX, and subscription-cycle quotas.
+- Fixed the AI quota response fields that caused initial AI loading and streamed completion failures; the client now recovers a persisted turn if a terminal stream event fails.
+- Added the About page, project copyright, legal/compliance content, global Chinese/English adaptation, and administrator identity labels.
+- Hardened Subscription Key activation rate limits, AI SSE proxy buffering, spreadsheet formula injection prevention, private artifact ignores, and runtime-cleanup procedures.
+- Reset local runtime data and completed the Alpha close-out audit. This version remains unreleased.
+
+### alpha-0822-NR — 2026-08-22
+
+- Delivered the foundation for pre-registration activation, academic profiles, matching, mutual selection, resources, the baseline AI assistant, Docker deployment, and bilingual UI.
+
+## Project documents
+
+- [Phase 1: User and account system](docs/phase1-user-system.md)
+- [Phase 2: Academic portraits](docs/phase2-academic-portraits.md)
+- [Phase 3: Subscriptions and institution administrators](docs/phase3-subscriptions-and-institution-admins.md)
+- [Phase 3: Offline subscription delivery](docs/phase3-offline-subscription-delivery.md)
 
 ---
 
-<div align="center">
-
-**智导未来 · 让每一份学术潜力找到合适的引路人。**
-**AcademicNexus · Connecting academic potential with the right mentorship.**
-
-`alpha-0822-NR` · Internal Alpha · Not Released
-
-</div>
+**AcademicNexus · 智导未来**<br>
+`alpha-0823-NR` · Internal Alpha · Not Released
