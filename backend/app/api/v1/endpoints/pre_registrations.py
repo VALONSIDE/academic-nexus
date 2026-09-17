@@ -103,7 +103,7 @@ def download_template(_admin: User = Depends(require_super_admin)) -> Response:
 
 
 @router.post("/import", status_code=status.HTTP_201_CREATED, summary="Import partner-school accounts / 导入合作院校账户")
-async def import_workbook(
+def import_workbook(
     file: Annotated[UploadFile, File(description="Partner-school pre-registration workbook / 合作院校预注册 Excel")],
     db: DbSession,
     _admin: User = Depends(require_super_admin),
@@ -111,7 +111,10 @@ async def import_workbook(
     filename = file.filename or "pre-registration.xlsx"
     if not filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=415, detail="Only .xlsx files are supported / 仅支持 .xlsx 文件")
-    content = await file.read(MAX_IMPORT_SIZE + 1)
+    try:
+        content = file.file.read(MAX_IMPORT_SIZE + 1)
+    finally:
+        file.file.close()
     if len(content) > MAX_IMPORT_SIZE:
         raise HTTPException(status_code=413, detail="Workbook exceeds 10 MB / Excel 文件超过 10 MB")
     try:
@@ -134,5 +137,6 @@ async def import_workbook(
             "Content-Disposition": f'attachment; filename="academicnexus-account-receipt-{batch.id}.xlsx"',
             "X-Pre-Registration-Batch-Id": str(batch.id),
             "X-Pre-Registration-Count": str(batch.row_count),
+            "Cache-Control": "no-store, private",
         },
     )

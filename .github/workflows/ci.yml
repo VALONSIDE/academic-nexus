@@ -6,11 +6,26 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Backend / 后端
     runs-on: ubuntu-22.04
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: ci-disposable-password
+          POSTGRES_DB: academicnexus_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d academicnexus_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
+      ACADEMICNEXUS_TEST_POSTGRES_URL: postgresql+psycopg://postgres:ci-disposable-password@localhost:5432/academicnexus_test
       PYTHONPATH: backend
       JWT_SECRET_KEY: ci-not-a-production-secret-please-replace
       ACCESS_KEY_PEPPER: ci-access-key-pepper-not-a-production-secret
@@ -47,5 +62,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python scripts/check_release.py
       - run: cp .env.example .env
       - run: docker compose config --quiet

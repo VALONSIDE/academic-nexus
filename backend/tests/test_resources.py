@@ -68,3 +68,13 @@ def test_resource_quota_and_profile_recommendation() -> None:
         ranked = resource_service.recommended_resources(db, student, limit=2)
         assert ranked[0][0].title == "Natural language processing with Python"
         assert ranked[0][1] > ranked[1][1]
+
+
+def test_course_metadata_uses_fixed_levels_and_canonical_duration() -> None:
+    assert resource_service.normalize_course_level("intermediate") == "intermediate"
+    assert resource_service.course_duration_from_parts("2", "30") == "2h 30m"
+    assert resource_service.normalize_course_duration("8h") == "8h"
+    with pytest.raises(resource_service.ResourceError, match="invalid_course_level"):
+        resource_service.normalize_course_level("custom level")
+    with pytest.raises(resource_service.ResourceError, match="invalid_course_duration"):
+        resource_service.course_duration_from_parts("1", "60")

@@ -2,7 +2,10 @@ alembic==1.16.5
 anthropic==0.76.0
 email-validator==2.3.0
 fastapi==0.141.1
+httpx==0.28.1
 openpyxl==3.1.5
+phonenumbers==9.0.39
+pgvector==0.4.1
 psycopg[binary]==3.2.10
 pwdlib[argon2]==0.3.0
 pydantic-settings==2.10.1

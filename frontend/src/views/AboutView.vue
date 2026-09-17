@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
+import { APP_VERSION } from '@/version'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -50,7 +51,7 @@ const team = [
         </aside>
       </div>
 
-      <footer class="flex flex-col gap-2 border-t border-slate-100 px-5 py-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-7"><span>{{ t('copyrightNotice') }}</span><span class="flex items-center gap-3"><RouterLink to="/legal" class="font-medium text-slate-600 hover:text-slate-900">{{ t('legalCompliance') }}</RouterLink><span>{{ t('aboutCopyrightCompact') }}</span></span></footer>
+      <footer class="flex flex-col gap-2 border-t border-slate-100 px-5 py-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-7"><span>{{ t('copyrightNotice') }}</span><span class="flex items-center gap-3"><RouterLink to="/legal" class="font-medium text-slate-600 hover:text-slate-900">{{ t('legalCompliance') }}</RouterLink><span>{{ APP_VERSION }}</span><span>{{ t('aboutCopyrightCompact') }}</span></span></footer>
     </section>
   </main>
 </template>

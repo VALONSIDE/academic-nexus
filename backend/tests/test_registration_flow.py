@@ -10,7 +10,7 @@ from app.models.pre_registration import PreRegistration, PreRegistrationBatch
 from app.models.tenant import Tenant
 from app.models.user import Role, User
 from app.schemas.auth import ActivationRequest, LoginRequest
-from app.schemas.profiles import StudentAcademicProfilePayload
+from app.schemas.profiles import StudentRegistrationCompleteRequest
 
 
 def test_account_cannot_log_in_until_academic_portrait_is_completed() -> None:
@@ -65,7 +65,9 @@ def test_account_cannot_log_in_until_academic_portrait_is_completed() -> None:
         assert pending is not None and not pending.is_active
 
         completed = complete_student_registration(
-            StudentAcademicProfilePayload(
+            StudentRegistrationCompleteRequest(
+                phone="+86 138 0013 8000",
+                email="Student@Example.edu",
                 research_interests=["人工智能"],
                 skills=["Python"],
                 academic_performance="GPA 3.8/4.0",
@@ -76,5 +78,7 @@ def test_account_cannot_log_in_until_academic_portrait_is_completed() -> None:
             db,
         )
         assert completed.user.is_active
+        assert completed.user.phone == "+8613800138000"
+        assert completed.user.email == "student@example.edu"
         assert db.scalar(select(PreRegistration.status).where(PreRegistration.id == pre_registration.id)) == "activated"
         assert login(LoginRequest(username="CUC_S20240001", password="AcademicNexus2026"), db).user.username == "CUC_S20240001"

@@ -73,14 +73,14 @@ def test_conversations_are_owned_deletable_and_capped_at_one_hundred() -> None:
         other = _user(db, organization, "HIST_S002", [student_role], created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
         db.commit()
 
-        first = create_conversation(db, account, topic="academic_planning", title="first")
+        first = create_conversation(db, account, topic="academic_planning")
         for number in range(100):
-            create_conversation(db, account, topic="academic_planning", title=f"conversation {number}")
+            create_conversation(db, account, topic="academic_planning")
         kept = list_conversations(db, account)
         assert len(kept) == 100
         assert all(item.id != first.id for item in kept)
 
-        other_conversation = create_conversation(db, other, topic="academic_planning", title="other")
+        other_conversation = create_conversation(db, other, topic="academic_planning")
         delete_conversation(db, other_conversation)
         assert len(list_conversations(db, other)) == 0
         assert len(list_conversations(db, account)) == 100

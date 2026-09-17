@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.config import get_settings
 from app.core.security import hash_password
@@ -22,6 +22,9 @@ def ensure_bootstrap_data() -> None:
     """Create the pilot tenant, standard roles, and first admin exactly once / 首次初始化试点租户、角色及管理员。"""
     settings = get_settings()
     with SessionLocal() as db:
+        if db.get_bind().dialect.name == "postgresql":
+            # Multiple workers may start together against the same empty DB.
+            db.execute(text("SELECT pg_advisory_xact_lock(714839205631)"))
         tenant = db.scalar(select(Tenant).where(Tenant.slug == settings.default_tenant_slug))
         if tenant is None:
             tenant = Tenant(slug=settings.default_tenant_slug, name=settings.default_tenant_name)
@@ -37,7 +40,11 @@ def ensure_bootstrap_data() -> None:
             roles[code] = role
         db.flush()
 
-        admin = db.scalar(select(User).where(User.tenant_id == tenant.id, User.email == settings.initial_admin_email.lower()))
+        admin = db.scalar(select(User).where(User.tenant_id == tenant.id, User.username == settings.initial_admin_username.upper()))
+        if admin is None:
+            admin = db.scalar(select(User).where(User.tenant_id == tenant.id, User.email == settings.initial_admin_email.lower()))
+        if admin is not None and not any(role.code in {"admin", "super_admin"} for role in admin.roles):
+            raise RuntimeError("Bootstrap identity belongs to a non-administrator; refusing to grant privileges")
         if admin is None:
             admin = User(
                 tenant_id=tenant.id,

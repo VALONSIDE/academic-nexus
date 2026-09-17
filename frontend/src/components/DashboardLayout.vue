@@ -41,6 +41,15 @@ const activeRole = computed(() => {
   return 'student'
 })
 
+const academicRole = computed<'student' | 'mentor' | null>(() => {
+  const roles = auth.state.user?.roles || []
+  if (roles.includes('mentor')) return 'mentor'
+  if (roles.includes('student')) return 'student'
+  return null
+})
+
+const hasAcademicPortrait = computed(() => academicRole.value !== null)
+
 const navigation = computed<NavigationItem[]>(() => {
   if (activeRole.value === 'admin') {
     const items = [
@@ -125,7 +134,7 @@ onMounted(loadAccountIdentity)
           <div v-if="accountMenuOpen" class="absolute bottom-[calc(100%+.5rem)] left-4 right-4 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
             <RouterLink :to="accountPath" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-100" @click="accountMenuOpen = false"><CircleUserRound class="h-4 w-4" />{{ t('accountManagement') }}</RouterLink>
             <RouterLink :to="{ path: accountPath, query: { panel: 'password' } }" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-100" @click="accountMenuOpen = false"><KeyRound class="h-4 w-4" />{{ t('changePassword') }}</RouterLink>
-            <RouterLink v-if="activeRole !== 'admin'" :to="{ path: accountPath, query: { panel: 'portrait' } }" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-100" @click="accountMenuOpen = false"><UserRound class="h-4 w-4" />{{ t('academicPortrait') }}</RouterLink>
+            <RouterLink v-if="hasAcademicPortrait" :to="{ path: accountPath, query: { panel: 'portrait' } }" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-100" @click="accountMenuOpen = false"><UserRound class="h-4 w-4" />{{ t('academicPortrait') }}</RouterLink>
             <RouterLink v-if="activeRole !== 'admin'" :to="`/${activeRole}/subscription`" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-100" @click="accountMenuOpen = false"><CreditCard class="h-4 w-4" />{{ t('subscription') }}</RouterLink>
             <RouterLink to="/legal" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-100" @click="accountMenuOpen = false"><ShieldCheck class="h-4 w-4" />{{ t('legalCompliance') }}</RouterLink>
           </div>

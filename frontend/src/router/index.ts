@@ -14,12 +14,12 @@ const router = createRouter({
     { path: '/activate/profile', name: 'activation-profile', component: () => import('@/views/ActivationProfileView.vue') },
     { path: '/registration-complete', name: 'registration-complete', component: () => import('@/views/RegistrationCompleteView.vue'), meta: { requiresAuth: true } },
     { path: '/register/:pathMatch(.*)*', redirect: '/activate' },
-    { path: '/admin/pre-registrations', name: 'admin-pre-registrations', component: () => import('@/views/PreRegistrationAdminView.vue'), meta: { role: 'admin' } },
+    { path: '/admin/pre-registrations', name: 'admin-pre-registrations', component: () => import('@/views/PreRegistrationAdminView.vue'), meta: { role: 'admin', superAdmin: true } },
     { path: '/admin/students', name: 'admin-students', component: () => import('@/views/UserManagementView.vue'), props: { role: 'student' }, meta: { role: 'admin' } },
     { path: '/admin/mentors', name: 'admin-mentors', component: () => import('@/views/UserManagementView.vue'), props: { role: 'mentor' }, meta: { role: 'admin' } },
-    { path: '/admin/ai-quotas', name: 'admin-ai-quotas', component: () => import('@/views/AdminAiQuotaView.vue'), meta: { role: 'admin' } },
-    { path: '/admin/resource-quotas', name: 'admin-resource-quotas', component: () => import('@/views/AdminResourceQuotaView.vue'), meta: { role: 'admin' } },
-    { path: '/admin/selection', name: 'admin-selection', component: () => import('@/views/AdminSelectionView.vue'), meta: { role: 'admin' } },
+    { path: '/admin/ai-quotas', name: 'admin-ai-quotas', component: () => import('@/views/AdminAiQuotaView.vue'), meta: { role: 'admin', superAdmin: true } },
+    { path: '/admin/resource-quotas', name: 'admin-resource-quotas', component: () => import('@/views/AdminResourceQuotaView.vue'), meta: { role: 'admin', superAdmin: true } },
+    { path: '/admin/selection', name: 'admin-selection', component: () => import('@/views/AdminSelectionView.vue'), meta: { role: 'admin', superAdmin: true } },
     { path: '/admin/subscriptions', name: 'admin-subscriptions', component: () => import('@/views/SubscriptionAdministrationView.vue'), meta: { role: 'admin' } },
     { path: '/admin/subscription-delivery', name: 'admin-subscription-delivery', component: () => import('@/views/SubscriptionDeliveryView.vue'), meta: { role: 'admin' } },
     { path: '/admin/institutions', name: 'admin-institutions', component: () => import('@/views/InstitutionManagementView.vue'), meta: { role: 'admin', superAdmin: true } },
@@ -48,7 +48,8 @@ router.beforeEach(async (to) => {
   const requiresAuth = Boolean(to.meta.requiresAuth) || Boolean(expectedRole)
   if (!requiresAuth) return true
   if (!auth.state.user && auth.state.token) await auth.refreshUser()
-  if (!auth.state.user) return { name: 'login', params: expectedRole ? { role: expectedRole } : {} }
+  if (!auth.isAuthenticated.value) return { name: 'login', params: expectedRole ? { role: expectedRole } : {} }
+  if (!auth.state.user) return { name: 'login' }
   if (!expectedRole) return true
   const hasExpectedRole = expectedRole === 'admin'
     ? auth.state.user.roles.some(role => ['admin', 'super_admin', 'institution_admin'].includes(role))

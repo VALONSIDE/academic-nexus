@@ -6,7 +6,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
 
 from app.api.deps import DbSession, require_administrator, require_roles, require_super_admin
 from app.models.subscription import InstitutionSubscriptionAllocation, PremiumSubscriptionKey
@@ -316,7 +315,7 @@ def delete_subscription_key(
 
 
 @delivery_router.post("/validate-excel", response_model=list[SubscriptionKeyDeliveryValidationResponse], summary="Validate an offline subscription-key receipt")
-async def validate_subscription_delivery_workbook(
+def validate_subscription_delivery_workbook(
     db: DbSession,
     response: Response,
     file: UploadFile = File(...),
@@ -326,8 +325,10 @@ async def validate_subscription_delivery_workbook(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "subscription_delivery_workbook_invalid"})
     # The receipt and its keys live only in bounded request memory.  Nothing is
     # written to disk or persisted while the receipt is being checked.
-    content = await file.read(512 * 1024 + 1)
-    await file.close()
+    try:
+        content = file.file.read(512 * 1024 + 1)
+    finally:
+        file.file.close()
     try:
         imported = extract_subscription_keys_from_workbook(content)
         response.headers["Cache-Control"] = "no-store, private"

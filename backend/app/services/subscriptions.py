@@ -74,7 +74,8 @@ def add_calendar_month(value: datetime) -> datetime:
 def _get_quota(db: Session, user_id, *, lock: bool = False) -> AiUserQuota | None:
     statement = select(AiUserQuota).where(AiUserQuota.user_id == user_id)
     if lock:
-        statement = statement.with_for_update()
+        db.flush()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     return db.scalar(statement)
 
 
@@ -102,9 +103,16 @@ def _synchronize_quota(db: Session, subscription: AiUserSubscription, *, reset_b
 
 
 def ensure_user_subscription(db: Session, user: User, *, lock: bool = False, now: datetime | None = None) -> AiUserSubscription:
-    statement = select(AiUserSubscription).where(AiUserSubscription.user_id == user.id)
-    if lock:
-        statement = statement.with_for_update()
+    # Even a snapshot can renew a cycle. Always lock and reload the current row.
+    db.flush()
+    statement = (select(AiUserSubscription).where(AiUserSubscription.user_id == user.id)
+                 .with_for_update().execution_options(populate_existing=True))
+    subscription = db.scalar(statement)
+    if subscription is not None:
+        return subscription
+    # A missing subscription cannot be row-locked; serialize its first creation
+    # through the existing account and recheck after acquiring that lock.
+    db.execute(select(User.id).where(User.id == user.id).with_for_update())
     subscription = db.scalar(statement)
     if subscription is not None:
         return subscription
@@ -490,8 +498,6 @@ def build_subscription_key_receipt(issued: list[IssuedSubscriptionKey]) -> bytes
     stream = BytesIO()
     workbook.save(stream)
     return stream.getvalue()
-    db.rollback()
-    raise SubscriptionError("subscription_key_generation_failed")
 
 
 def list_subscription_keys(db: Session, admin: User) -> list[PremiumSubscriptionKey]:

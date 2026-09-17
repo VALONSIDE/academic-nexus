@@ -28,6 +28,7 @@ class ResourceResponse(BaseModel):
 
 
 class ResourceListResponse(BaseModel):
+    ranking_mode: Literal["local", "semantic", "hybrid"] | None = None
     items: list[ResourceResponse]
     total: int
 

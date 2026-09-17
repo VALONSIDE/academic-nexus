@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import UploadFile
 from sqlalchemy import or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
@@ -20,6 +21,8 @@ from app.models.user import StudentProfile, User
 MEGABYTE = 1024 * 1024
 _SPLIT = re.compile(r"[,，;；、|/\n\r]+")
 _EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".txt", ".md", ".zip"}
+COURSE_LEVELS = frozenset({"beginner", "intermediate", "advanced", "all_levels"})
+_COURSE_DURATION_PATTERN = re.compile(r"^(?P<hours>\d{1,4})h(?:\s+(?P<minutes>\d{1,2})m)?$")
 
 
 class ResourceError(RuntimeError):
@@ -65,6 +68,13 @@ def _storage_path(key: str) -> Path:
 
 
 async def stage_upload(upload: UploadFile) -> StagedFile | None:
+    try:
+        return await _stage_upload(upload)
+    finally:
+        await upload.close()
+
+
+async def _stage_upload(upload: UploadFile) -> StagedFile | None:
     if not upload.filename:
         return None
     original_name = Path(upload.filename).name
@@ -82,21 +92,28 @@ async def stage_upload(upload: UploadFile) -> StagedFile | None:
                 if size > limit:
                     raise ResourceError("file_too_large")
                 stream.write(chunk)
-    except Exception:
+    except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
-    finally:
-        await upload.close()
     return StagedFile(temporary_path, size, original_name[:255], upload.content_type, extension)
 
 
 def _quota(db: Session, mentor_id, *, lock: bool = False) -> MentorResourceQuota:
     statement = select(MentorResourceQuota).where(MentorResourceQuota.user_id == mentor_id)
     if lock:
-        statement = statement.with_for_update()
+        db.flush()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     quota = db.scalar(statement)
     if quota is not None:
         return quota
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            pg_insert(MentorResourceQuota)
+            .values(id=uuid.uuid4(), user_id=mentor_id,
+                    quota_bytes=get_settings().mentor_resource_default_quota_mb * MEGABYTE, used_bytes=0)
+            .on_conflict_do_nothing(index_elements=["user_id"])
+        )
+        return db.scalars(statement).one()
     quota = MentorResourceQuota(
         user_id=mentor_id,
         quota_bytes=get_settings().mentor_resource_default_quota_mb * MEGABYTE,
@@ -112,11 +129,18 @@ def quota_snapshot(db: Session, mentor_id) -> MentorResourceQuota:
 
 
 def reserve_file_bytes(db: Session, mentor_id, size_bytes: int) -> MentorResourceQuota:
+    if size_bytes < 0:
+        raise ValueError("size_bytes must not be negative")
     quota = _quota(db, mentor_id, lock=True)
     if quota.used_bytes + size_bytes > quota.quota_bytes:
         raise ResourceError("resource_quota_exceeded")
     quota.used_bytes += size_bytes
     return quota
+
+
+def release_file_bytes(db: Session, mentor_id, size_bytes: int) -> None:
+    quota = _quota(db, mentor_id, lock=True)
+    quota.used_bytes = max(0, quota.used_bytes - size_bytes)
 
 
 def update_quota(db: Session, mentor_id, quota_mb: int) -> MentorResourceQuota:
@@ -132,7 +156,11 @@ def update_quota(db: Session, mentor_id, quota_mb: int) -> MentorResourceQuota:
 
 def add_specialization(resource: Resource, *, resource_type: str, form: dict[str, str | int | None]) -> None:
     if resource_type == "course":
-        resource.course = Course(provider=_text(form.get("provider"), 160), level=_text(form.get("level"), 80), duration=_text(form.get("duration"), 80))
+        resource.course = Course(
+            provider=_text(form.get("provider"), 160),
+            level=normalize_course_level(form.get("level")),
+            duration=normalize_course_duration(form.get("duration")),
+        )
     elif resource_type == "paper":
         resource.paper = Paper(
             authors=_text(form.get("authors"), 800),
@@ -154,6 +182,37 @@ def _text(value: str | int | None, maximum: int) -> str | None:
         return None
     normalized = str(value).strip()
     return normalized[:maximum] or None
+
+
+def normalize_course_level(value: str | int | None) -> str:
+    normalized = _text(value, 80)
+    if normalized not in COURSE_LEVELS:
+        raise ResourceError("invalid_course_level")
+    return normalized
+
+
+def normalize_course_duration(value: str | int | None) -> str:
+    normalized = _text(value, 80)
+    if normalized is None:
+        raise ResourceError("invalid_course_duration")
+    match = _COURSE_DURATION_PATTERN.fullmatch(normalized)
+    if match is None:
+        raise ResourceError("invalid_course_duration")
+    hours = int(match.group("hours"))
+    minutes = int(match.group("minutes") or 0)
+    if minutes >= 60 or (hours == 0 and minutes == 0):
+        raise ResourceError("invalid_course_duration")
+    return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+
+
+def course_duration_from_parts(hours: str | int | None, minutes: str | int | None) -> str:
+    normalized_hours = str(hours).strip() if hours is not None else "0"
+    normalized_minutes = str(minutes).strip() if minutes is not None else "0"
+    normalized_hours = normalized_hours or "0"
+    normalized_minutes = normalized_minutes or "0"
+    if not normalized_hours.isdecimal() or not normalized_minutes.isdecimal():
+        raise ResourceError("invalid_course_duration")
+    return normalize_course_duration(f"{normalized_hours}h {normalized_minutes}m")
 
 
 def _year(value: str | int | None) -> int | None:
@@ -208,12 +267,14 @@ def list_resources(db: Session, *, tenant_id, owner_user_id=None, resource_type:
     return list(db.scalars(_resource_statement(tenant_id=tenant_id, owner_user_id=owner_user_id, resource_type=resource_type, search=search)).all())
 
 
-def get_resource(db: Session, *, tenant_id, resource_id) -> Resource | None:
-    return db.scalar(
-        select(Resource)
+def get_resource(db: Session, *, tenant_id, resource_id, lock: bool = False) -> Resource | None:
+    statement = (select(Resource)
         .options(selectinload(Resource.course), selectinload(Resource.paper), selectinload(Resource.book))
         .where(Resource.id == resource_id, Resource.tenant_id == tenant_id)
     )
+    if lock:
+        statement = statement.with_for_update().execution_options(populate_existing=True)
+    return db.scalar(statement)
 
 
 def metadata(resource: Resource) -> dict[str, str | int | None]:
@@ -251,5 +312,11 @@ def recommended_resources(db: Session, student: User, *, limit: int) -> list[tup
     if student.student_profile is None:
         return []
     resources = list_resources(db, tenant_id=student.tenant_id)
-    ranked = [(resource, recommendation_score(student.student_profile, resource)) for resource in resources]
-    return sorted(ranked, key=lambda item: (-item[1], item[0].title.casefold()))[:limit]
+    from app.services import ranking
+    candidates = [ranking.Candidate(str(resource.id), ranking.clean_text("; ".join(
+        [resource.title, resource.description or "", *(resource.topics or []), *(resource.tags or [])])),
+        recommendation_score(student.student_profile, resource)) for resource in resources]
+    result = ranking.rank(db, student.tenant_id, ranking.academic_text(student.student_profile, student), candidates)
+    db.info["resource_ranking_mode"] = result.mode
+    ranked = [(resource, result.scores[str(resource.id)]) for resource in resources]
+    return sorted(ranked, key=lambda item: (-item[1], str(item[0].id)))[:limit]

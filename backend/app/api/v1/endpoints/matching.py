@@ -28,16 +28,22 @@ def recommend_mentors(
     db: DbSession,
     student: User = Depends(require_roles("student")),
     limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
 ) -> MentorRecommendationListResponse:
     student = db.scalar(
         select(User).options(selectinload(User.student_profile)).where(User.id == student.id)
     )
     if student is None or student.student_profile is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "portrait_required"})
-    matches = mentor_recommendations(db, student, limit=limit)
+    matches = mentor_recommendations(db, student)
+    db.commit()
+    total = len(matches)
+    mode = matches[0][1].ranking_mode if matches else "local"
+    matches = matches[offset:offset + limit] if limit is not None else matches[offset:]
     return MentorRecommendationListResponse(
         algorithm_version=ALGORITHM_VERSION,
-        total=len(matches),
+        total=total,
+        ranking_mode=mode,
         items=[
             MatchedMentorResponse(
                 user_id=mentor.id,
@@ -45,7 +51,7 @@ def recommend_mentors(
                 full_name=mentor.full_name,
                 university=mentor.mentor_profile.university,
                 department=mentor.mentor_profile.department,
-                same_college=mentor.mentor_profile.department == student.student_profile.department,
+                same_college=bool(student.student_profile.department and mentor.mentor_profile.department == student.student_profile.department),
                 title=mentor.mentor_profile.title,
                 research_directions=mentor.mentor_profile.research_directions or [],
                 representative_papers=mentor.mentor_profile.representative_papers or [],
@@ -64,16 +70,22 @@ def recommend_students(
     db: DbSession,
     mentor: User = Depends(require_roles("mentor")),
     limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
 ) -> StudentCandidateListResponse:
     mentor = db.scalar(
         select(User).options(selectinload(User.mentor_profile)).where(User.id == mentor.id)
     )
     if mentor is None or mentor.mentor_profile is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "portrait_required"})
-    matches = student_candidates(db, mentor, limit=limit)
+    matches = student_candidates(db, mentor)
+    db.commit()
+    total = len(matches)
+    mode = matches[0][1].ranking_mode if matches else "local"
+    matches = matches[offset:offset + limit] if limit is not None else matches[offset:]
     return StudentCandidateListResponse(
         algorithm_version=ALGORITHM_VERSION,
-        total=len(matches),
+        total=total,
+        ranking_mode=mode,
         items=[
             MatchedStudentResponse(
                 user_id=student.id,
@@ -81,7 +93,7 @@ def recommend_students(
                 full_name=student.full_name,
                 university=student.student_profile.university,
                 department=student.student_profile.department,
-                same_college=student.student_profile.department == mentor.mentor_profile.department,
+                same_college=bool(mentor.mentor_profile.department and student.student_profile.department == mentor.mentor_profile.department),
                 major=student.student_profile.major,
                 grade=student.student_profile.grade,
                 research_interests=student.student_profile.research_interests or [],

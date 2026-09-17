@@ -29,6 +29,7 @@ services:
     restart: unless-stopped
 
   api:
+    restart: unless-stopped
     build:
       context: ./backend
       target: production
@@ -62,6 +63,7 @@ services:
       retries: 10
 
   web:
+    restart: unless-stopped
     build:
       context: ./frontend
       target: production

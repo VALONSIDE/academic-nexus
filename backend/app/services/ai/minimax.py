@@ -35,7 +35,7 @@ def _client() -> Anthropic:
     settings = get_settings()
     if not settings.minimax_api_key.strip():
         raise MiniMaxConfigurationError("MINIMAX_API_KEY is not configured")
-    return Anthropic(api_key=settings.minimax_api_key, base_url=settings.minimax_base_url)
+    return Anthropic(api_key=settings.minimax_api_key, base_url=settings.minimax_base_url, timeout=120.0, max_retries=0)
 
 
 def request_completion(*, system: str, messages: list[dict[str, object]], model: str) -> MiniMaxReply:
@@ -52,6 +52,8 @@ def request_completion(*, system: str, messages: list[dict[str, object]], model:
         )
     except Exception as error:  # Provider exceptions are intentionally not leaked to API clients.
         raise MiniMaxRequestError(type(error).__name__) from error
+    finally:
+        client.close()
 
     text_blocks = [getattr(block, "text", "") for block in response.content if getattr(block, "type", "") == "text"]
     content = "\n".join(block for block in text_blocks if block).strip()
@@ -68,8 +70,11 @@ def request_completion(*, system: str, messages: list[dict[str, object]], model:
 def stream_completion(*, system: str, messages: list[dict[str, object]], model: str) -> Iterator[MiniMaxStreamEvent]:
     """Yield public text deltas only; provider reasoning is never exposed to the client."""
     settings = get_settings()
+    client = None
+    stream = None
     try:
-        stream = _client().messages.create(
+        client = _client()
+        stream = client.messages.create(
             model=model,
             max_tokens=settings.ai_max_output_tokens,
             temperature=0.7,
@@ -79,6 +84,7 @@ def stream_completion(*, system: str, messages: list[dict[str, object]], model: 
             stream=True,
         )
         has_text = False
+        stopped = False
         input_tokens: int | None = None
         output_tokens: int | None = None
         for chunk in stream:
@@ -95,6 +101,10 @@ def stream_completion(*, system: str, messages: list[dict[str, object]], model: 
                 if text:
                     has_text = True
                     yield MiniMaxStreamEvent(text=text)
+            elif chunk_type == "message_stop":
+                stopped = True
+        if not stopped:
+            raise MiniMaxRequestError("incomplete_provider_response")
         if not has_text:
             raise MiniMaxRequestError("empty_provider_response")
         yield MiniMaxStreamEvent(completed=True, input_tokens=input_tokens, output_tokens=output_tokens)
@@ -104,3 +114,10 @@ def stream_completion(*, system: str, messages: list[dict[str, object]], model: 
         raise
     except Exception as error:  # Provider exceptions are intentionally not leaked to API clients.
         raise MiniMaxRequestError(type(error).__name__) from error
+    finally:
+        try:
+            if stream is not None:
+                stream.close()
+        finally:
+            if client is not None:
+                client.close()

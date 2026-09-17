@@ -2,6 +2,8 @@ import re
 from typing import Literal
 from uuid import UUID
 
+import phonenumbers
+from email_validator import EmailNotValidError, validate_email
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -18,6 +20,33 @@ def validate_password_strength(password: str) -> str:
     if not (has_upper and has_lower and has_digit):
         raise ValueError("Password must include uppercase, lowercase, and a number / 密码须含大小写字母和数字")
     return password
+
+
+def normalize_phone(phone: str | None) -> str | None:
+    if phone is None:
+        return None
+    candidate = " ".join(phone.split())
+    if not candidate:
+        return None
+    try:
+        parsed = phonenumbers.parse(candidate, None)
+    except phonenumbers.NumberParseException as error:
+        raise ValueError("Invalid international phone number / 国际联系电话格式不正确") from error
+    if not phonenumbers.is_valid_number(parsed):
+        raise ValueError("Invalid international phone number / 国际联系电话格式不正确")
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+
+def normalize_email(email: str | None) -> str | None:
+    if email is None:
+        return None
+    candidate = email.strip()
+    if not candidate:
+        return None
+    try:
+        return validate_email(candidate, check_deliverability=False).normalized.lower()
+    except EmailNotValidError as error:
+        raise ValueError("Invalid email address / 邮箱格式不正确") from error
 
 
 class ActivationRequest(BaseModel):
@@ -73,6 +102,25 @@ class LocaleUpdateRequest(BaseModel):
     preferred_locale: Locale
 
 
+class ContactUpdateRequest(BaseModel):
+    phone: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=320)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, phone: str | None) -> str | None:
+        return normalize_phone(phone)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, email: str | None) -> str | None:
+        return normalize_email(email)
+
+
+class ContactPhoneUpdateRequest(ContactUpdateRequest):
+    """Backward-compatible request shape for the former phone-only endpoint."""
+
+
 class PasswordChangeRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=12, max_length=128)
@@ -89,6 +137,8 @@ class UserResponse(BaseModel):
     id: UUID
     username: str
     full_name: str
+    phone: str | None = None
+    email: str | None = None
     preferred_locale: Locale
     is_active: bool
     roles: list[str]

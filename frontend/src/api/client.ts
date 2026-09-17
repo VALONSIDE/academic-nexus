@@ -46,18 +46,33 @@ import type {
 const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
 export class ApiError extends Error {
-  constructor(message: string, public readonly details: string[] = [], public readonly code?: string) {
+  constructor(message: string, public readonly details: string[] = [], public readonly code?: string, public readonly status?: number) {
     super(message)
     this.name = 'ApiError'
   }
 }
 
 async function responseError(response: Response): Promise<ApiError> {
-  const body = (await response.json().catch(() => ({}))) as { detail?: string | string[] | { code?: string } }
-  const detail = body.detail
-  if (Array.isArray(detail)) return new ApiError(detail.join('\n'), detail)
-  if (detail && typeof detail === 'object') return new ApiError(detail.code || `Request failed (${response.status})`, [], detail.code)
-  return new ApiError(detail || `Request failed (${response.status})`)
+  const body: unknown = await response.json().catch(() => null)
+  const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : undefined
+  const fallback = `Request failed (${response.status})`
+  if (Array.isArray(detail)) {
+    const messages = detail.flatMap((item: unknown) => {
+      if (typeof item === 'string') return [item]
+      if (item && typeof item === 'object' && 'msg' in item && typeof item.msg === 'string') {
+        const path = 'loc' in item && Array.isArray(item.loc)
+          ? item.loc.filter(part => typeof part === 'string' || typeof part === 'number').filter(part => part !== 'body').join('.')
+          : ''
+        return [path ? `${path}: ${item.msg}` : item.msg]
+      }
+      return []
+    })
+    return new ApiError(messages.join('\n') || fallback, messages, undefined, response.status)
+  }
+  if (detail && typeof detail === 'object' && 'code' in detail && typeof detail.code === 'string') {
+    return new ApiError(detail.code, [], detail.code, response.status)
+  }
+  return new ApiError(typeof detail === 'string' ? detail : fallback, [], undefined, response.status)
 }
 
 async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
@@ -89,6 +104,9 @@ export const authApi = {
   updateLocale(token: string, preferred_locale: User['preferred_locale']) {
     return request<User>('/auth/me/locale', { method: 'PATCH', body: JSON.stringify({ preferred_locale }) }, token)
   },
+  updateContact(token: string, contact: { phone: string; email: string }) {
+    return request<User>('/auth/me/contact', { method: 'PATCH', body: JSON.stringify(contact) }, token)
+  },
   changeOwnPassword(token: string, current_password: string, new_password: string) {
     return request<AuthResponse>('/auth/me/password', { method: 'POST', body: JSON.stringify({ current_password, new_password }) }, token)
   },
@@ -113,11 +131,11 @@ export const authApi = {
   deletePreRegistrations(token: string, ids: string[]) {
     return request<void>('/admin/pre-registrations/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) }, token)
   },
-  completeStudentRegistration(token: string, payload: StudentAcademicProfile) {
-    return request<AuthResponse>('/profiles/student/complete-registration', { method: 'POST', body: JSON.stringify(payload) }, token)
+  completeStudentRegistration(token: string, payload: StudentAcademicProfile, contact: { phone: string; email: string }) {
+    return request<AuthResponse>('/profiles/student/complete-registration', { method: 'POST', body: JSON.stringify({ ...payload, ...contact }) }, token)
   },
-  completeMentorRegistration(token: string, payload: MentorAcademicProfile) {
-    return request<AuthResponse>('/profiles/mentor/complete-registration', { method: 'POST', body: JSON.stringify(payload) }, token)
+  completeMentorRegistration(token: string, payload: MentorAcademicProfile, contact: { phone: string; email: string }) {
+    return request<AuthResponse>('/profiles/mentor/complete-registration', { method: 'POST', body: JSON.stringify({ ...payload, ...contact }) }, token)
   },
   studentProfile(token: string) {
     return request<AcademicProfileResponse>('/profiles/student/me', {}, token)
@@ -234,8 +252,8 @@ export const authApi = {
   aiConversations(token: string) {
     return request<AiConversation[]>('/ai/conversations', {}, token)
   },
-  createAiConversation(token: string, topic: AiTopic, title?: string) {
-    return request<AiConversation>('/ai/conversations', { method: 'POST', body: JSON.stringify({ topic, title }) }, token)
+  createAiConversation(token: string, topic: AiTopic) {
+    return request<AiConversation>('/ai/conversations', { method: 'POST', body: JSON.stringify({ topic }) }, token)
   },
   renameAiConversation(token: string, conversationId: string, title: string) {
     return request<AiConversation>(`/ai/conversations/${conversationId}`, { method: 'PATCH', body: JSON.stringify({ title }) }, token)
@@ -262,25 +280,33 @@ export const authApi = {
     const decoder = new TextDecoder()
     let buffer = ''
     let completed: AiChatResponse | null = null
-    while (true) {
-      const { done, value } = await reader.read()
-      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
-      const events = buffer.split(/\r?\n\r?\n/)
-      buffer = events.pop() || ''
-      for (const rawEvent of events) {
-        const lines = rawEvent.split(/\r?\n/)
-        const event = lines.find(line => line.startsWith('event:'))?.slice(6).trim()
-        const rawData = lines.find(line => line.startsWith('data:'))?.slice(5).trim()
-        if (!event || !rawData) continue
-        const data = JSON.parse(rawData) as { text?: string; code?: string } | AiChatResponse
-        if (event === 'text' && 'text' in data && data.text) onText(data.text)
-        if (event === 'error' && 'code' in data) throw new ApiError(data.code || 'Streaming request failed', [], data.code)
-        if (event === 'done') completed = data as AiChatResponse
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+        const events = buffer.split(/\r?\n\r?\n/)
+        buffer = events.pop() || ''
+        for (const rawEvent of events) {
+          const lines = rawEvent.split(/\r?\n/)
+          const event = lines.find(line => line.startsWith('event:'))?.slice(6).trim()
+          const rawData = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n')
+          if (!event || !rawData) continue
+          const data = JSON.parse(rawData) as { text?: string; code?: string } | AiChatResponse
+          if (event === 'text' && 'text' in data && data.text) onText(data.text)
+          if (event === 'error' && 'code' in data) throw new ApiError(data.code || 'Streaming request failed', [], data.code)
+          if (event === 'done') {
+            completed = data as AiChatResponse
+            return completed
+          }
+        }
+        if (done) break
       }
-      if (done) break
+      if (!completed) throw new ApiError('Streaming response ended without a completion event')
+      return completed
+    } finally {
+      await reader.cancel().catch(() => undefined)
+      reader.releaseLock()
     }
-    if (!completed) throw new ApiError('Streaming response ended without a completion event')
-    return completed
   },
   adminAiQuotas(token: string, role?: 'student' | 'mentor', search = '') {
     const query = new URLSearchParams({ ...(role ? { role } : {}), ...(search ? { search } : {}) })

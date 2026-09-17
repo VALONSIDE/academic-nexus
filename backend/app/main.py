@@ -1,8 +1,11 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.deps import DbSession
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.services.bootstrap import ensure_bootstrap_data
@@ -34,11 +37,16 @@ app.add_middleware(
     # Profile editing and resource management use PUT and DELETE respectively.
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept-Language"],
+    expose_headers=["Content-Disposition", "X-Pre-Registration-Count", "X-Subscription-Key-Count"],
 )
 
 app.include_router(api_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health", tags=["System / 系统"])
-def health_check() -> dict[str, str]:
+def health_check(db: DbSession) -> dict[str, str]:
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Database unavailable") from None
     return {"status": "ok", "message": "AcademicNexus is ready / 智导未来服务已就绪"}

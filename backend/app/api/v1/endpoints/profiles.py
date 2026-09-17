@@ -4,11 +4,17 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, PendingRegistrationUser
-from app.api.v1.endpoints.auth import authenticate_response
+from app.api.v1.endpoints.auth import authenticate_response, ensure_email_available
 from app.models.pre_registration import PreRegistration
 from app.models.user import MentorProfile, StudentProfile, User
 from app.schemas.auth import AuthResponse
-from app.schemas.profiles import AcademicProfileResponse, MentorAcademicProfilePayload, StudentAcademicProfilePayload
+from app.schemas.profiles import (
+    AcademicProfileResponse,
+    MentorAcademicProfilePayload,
+    MentorRegistrationCompleteRequest,
+    StudentAcademicProfilePayload,
+    StudentRegistrationCompleteRequest,
+)
 
 router = APIRouter(prefix="/profiles", tags=["Academic portraits / 学术画像"])
 
@@ -79,7 +85,7 @@ def apply_mentor_profile(profile: MentorProfile, payload: MentorAcademicProfileP
     summary="Complete student registration / 完成学生注册",
 )
 def complete_student_registration(
-    payload: StudentAcademicProfilePayload,
+    payload: StudentRegistrationCompleteRequest,
     pending_user: PendingRegistrationUser,
     db: DbSession,
 ) -> AuthResponse:
@@ -90,9 +96,13 @@ def complete_student_registration(
     )
     if pre_registration is None or pre_registration.status != "issued":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Registration has already been completed / 注册已完成")
+    ensure_email_available(db, pending_user, payload.email)
+    pending_user.phone = payload.phone
+    pending_user.email = payload.email
     apply_student_profile(pending_user.student_profile, payload, complete=True)
     pending_user.is_active = True
     pending_user.is_verified = True
+    pending_user.auth_version += 1
     pre_registration.status = "activated"
     pre_registration.activated_at = datetime.now(timezone.utc)
     db.commit()
@@ -106,7 +116,7 @@ def complete_student_registration(
     summary="Complete mentor registration / 完成导师注册",
 )
 def complete_mentor_registration(
-    payload: MentorAcademicProfilePayload,
+    payload: MentorRegistrationCompleteRequest,
     pending_user: PendingRegistrationUser,
     db: DbSession,
 ) -> AuthResponse:
@@ -117,9 +127,13 @@ def complete_mentor_registration(
     )
     if pre_registration is None or pre_registration.status != "issued":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Registration has already been completed / 注册已完成")
+    ensure_email_available(db, pending_user, payload.email)
+    pending_user.phone = payload.phone
+    pending_user.email = payload.email
     apply_mentor_profile(pending_user.mentor_profile, payload, complete=True)
     pending_user.is_active = True
     pending_user.is_verified = True
+    pending_user.auth_version += 1
     pre_registration.status = "activated"
     pre_registration.activated_at = datetime.now(timezone.utc)
     db.commit()

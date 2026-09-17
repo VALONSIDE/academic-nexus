@@ -35,7 +35,7 @@ const selectionMax = computed(() => Math.max(1, ...(data.value?.selection_statis
 const roleLabel = computed(() => t(`${activeRole.value}Dashboard`))
 const displayName = computed(() => auth.state.user?.full_name || auth.state.user?.username || '')
 
-const quickActions = computed<{ label: string; description: string; to: string; icon: Component }[]>(() => {
+const quickActions = computed<{ label: string; description?: string; to: string; icon: Component }[]>(() => {
   if (activeRole.value === 'admin') {
     const isSuperAdmin = auth.state.user?.roles.some(role => ['admin', 'super_admin'].includes(role))
     return [
@@ -48,7 +48,7 @@ const quickActions = computed<{ label: string; description: string; to: string; 
   return [
     { label: activeRole.value === 'mentor' ? t('studentMatching') : t('mentorMatching'), description: t('dashboardActionMatchesDescription'), to: `/${activeRole.value}/matches`, icon: WandSparkles },
     { label: activeRole.value === 'student' ? t('learningResources') : t('manageResources'), description: t('dashboardActionResourcesDescription'), to: `/${activeRole.value}/resources`, icon: BookOpenCheck },
-    { label: t('aiAssistant'), description: t('dashboardActionAssistantDescription'), to: `/${activeRole.value}/assistant`, icon: BotMessageSquare },
+    { label: t('aiAssistant'), to: `/${activeRole.value}/assistant`, icon: BotMessageSquare },
   ]
 })
 
@@ -111,7 +111,7 @@ onMounted(load)
           <Card class="rounded-2xl p-6 shadow-sm"><div class="flex items-center justify-between gap-3"><div class="flex items-center gap-2"><span class="grid h-8 w-8 place-items-center rounded-lg bg-violet-50 text-violet-700"><BellRing class="h-4 w-4" /></span><h2 class="font-semibold text-slate-900">{{ t('latestSelectionMessages') }}</h2></div><Clock3 class="h-5 w-5 text-slate-400" /></div><div v-if="data.recent_selection_activity.length" class="mt-5 divide-y divide-slate-100"><div v-for="item in data.recent_selection_activity" :key="item.id" class="flex items-center gap-3 py-3.5"><span class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{{ item.student_name.slice(0, 1) }}</span><div class="min-w-0 flex-1"><p class="truncate text-sm font-medium text-slate-800">{{ activityText(item) }}</p><p class="mt-1 text-xs text-slate-500">{{ activityStatus(item.status) }}</p></div><ChevronRight class="h-4 w-4 shrink-0 text-slate-300" /></div></div><div v-else class="mt-7 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">{{ t('selectionActivityEmpty') }}</div></Card>
         </section>
 
-        <section class="mt-6"><div class="mb-4 flex items-center justify-between"><div><h2 class="text-lg font-semibold text-slate-900">{{ t('quickActions') }}</h2><p class="mt-1 text-sm text-slate-500">{{ roleLabel }}</p></div></div><div class="grid gap-4 md:grid-cols-3"><RouterLink v-for="action in quickActions" :key="action.to" :to="action.to" class="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow-md"><span class="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-700 transition group-hover:bg-slate-950 group-hover:text-white"><component :is="action.icon" class="h-5 w-5" /></span><div class="mt-5 flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-900">{{ action.label }}</h3><p class="mt-1.5 text-sm leading-6 text-slate-600">{{ action.description }}</p></div><ArrowUpRight class="h-4 w-4 shrink-0 text-slate-400 transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-slate-900" /></div></RouterLink></div></section>
+        <section class="mt-6"><div class="mb-4 flex items-center justify-between"><div><h2 class="text-lg font-semibold text-slate-900">{{ t('quickActions') }}</h2><p class="mt-1 text-sm text-slate-500">{{ roleLabel }}</p></div></div><div class="grid gap-4 md:grid-cols-3"><RouterLink v-for="action in quickActions" :key="action.to" :to="action.to" class="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow-md"><span class="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-700 transition group-hover:bg-slate-950 group-hover:text-white"><component :is="action.icon" class="h-5 w-5" /></span><div class="mt-5 flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-900">{{ action.label }}</h3><p v-if="action.description" class="mt-1.5 text-sm leading-6 text-slate-600">{{ action.description }}</p></div><ArrowUpRight class="h-4 w-4 shrink-0 text-slate-400 transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-slate-900" /></div></RouterLink></div></section>
         <ResourceRecommendationPanel v-if="activeRole === 'student'" />
       </template>
       <p v-else-if="error" class="mt-8 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{{ error }}</p>

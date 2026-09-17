@@ -1,11 +1,12 @@
 """Learning-resource library, mentor uploads, and administrator storage controls."""
 
-from pathlib import Path
+import logging
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
+from pydantic import HttpUrl, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -27,6 +28,8 @@ from app.services import resources as resource_service
 router = APIRouter(prefix="/resources", tags=["Learning resources / 学习资源"])
 mentor_router = APIRouter(prefix="/mentor/resources", tags=["Mentor resources / 导师资源"])
 admin_router = APIRouter(prefix="/admin/resource-quotas", tags=["Resource quota administration / 资源配额管理"])
+logger = logging.getLogger(__name__)
+_http_url = TypeAdapter(HttpUrl)
 
 
 def _quota_response(quota: MentorResourceQuota) -> MentorResourceQuotaResponse:
@@ -65,9 +68,13 @@ def _validate_url(value: str) -> str | None:
     normalized = value.strip()
     if not normalized:
         return None
-    if not normalized.startswith(("https://", "http://")):
+    try:
+        parsed = _http_url.validate_python(normalized)
+    except ValidationError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "invalid_resource_url"})
-    return normalized[:2048]
+    if len(normalized) > 2048 or parsed.username or parsed.password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "invalid_resource_url"})
+    return str(parsed)
 
 
 @router.get("", response_model=ResourceListResponse, summary="List resource library / 查询资源库")
@@ -92,8 +99,10 @@ def recommend_resources(
     if student is None or student.student_profile is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "portrait_required"})
     ranked = resource_service.recommended_resources(db, student, limit=limit)
+    db.commit()
     owners = resource_service.owners_by_id(db, [resource for resource, _ in ranked])
     return ResourceListResponse(
+        ranking_mode=db.info.get("resource_ranking_mode", "local"),
         items=[_serialize(resource, owners, recommendation_score=score) for resource, score in ranked],
         total=len(ranked),
     )
@@ -110,7 +119,8 @@ def download_resource(resource_id: UUID, current_user: CurrentUser, db: DbSessio
         raise _resource_error(error) from error
     if path is None or not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "resource_file_not_found"})
-    return FileResponse(path, media_type=resource.file_content_type or "application/octet-stream", filename=resource.file_original_name)
+    return FileResponse(path, media_type="application/octet-stream", filename=resource.file_original_name or path.name,
+                        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @mentor_router.get("/quota", response_model=MentorResourceQuotaResponse, summary="Read own resource storage quota / 获取资源存储配额")
@@ -139,6 +149,8 @@ async def create_resource(
     provider: Annotated[str, Form(max_length=160)] = "",
     level: Annotated[str, Form(max_length=80)] = "",
     duration: Annotated[str, Form(max_length=80)] = "",
+    duration_hours: Annotated[str, Form(max_length=4)] = "",
+    duration_minutes: Annotated[str, Form(max_length=2)] = "",
     authors: Annotated[str, Form(max_length=800)] = "",
     publication: Annotated[str, Form(max_length=400)] = "",
     doi: Annotated[str, Form(max_length=200)] = "",
@@ -149,7 +161,10 @@ async def create_resource(
 ) -> ResourceResponse:
     staged: resource_service.StagedFile | None = None
     persisted_key: str | None = None
+    committed = False
     try:
+        if len(title.strip()) < 2:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Title must contain at least two non-space characters / 标题至少包含两个非空白字符")
         staged = await resource_service.stage_upload(file) if file is not None else None
         url = _validate_url(external_url)
         if staged is None and url is None:
@@ -173,18 +188,33 @@ async def create_resource(
         resource_service.add_specialization(
             resource,
             resource_type=resource_type,
-            form={"provider": provider, "level": level, "duration": duration, "authors": authors, "publication": publication, "doi": doi, "publisher": publisher, "isbn": isbn, "publication_year": publication_year},
+            form={
+                "provider": provider,
+                "level": level,
+                "duration": (
+                    resource_service.course_duration_from_parts(duration_hours, duration_minutes)
+                    if resource_type == "course" and (duration_hours.strip() or duration_minutes.strip())
+                    else duration
+                ),
+                "authors": authors,
+                "publication": publication,
+                "doi": doi,
+                "publisher": publisher,
+                "isbn": isbn,
+                "publication_year": publication_year,
+            },
         )
         db.flush()
         if staged is not None:
             persisted_key = resource_service.finalize_staged_file(staged, tenant_id=mentor.tenant_id, mentor_id=mentor.id)
             resource.file_storage_key = persisted_key
         db.commit()
+        committed = True
         db.refresh(resource)
         return _serialize(resource, {mentor.id: mentor.full_name})
     except resource_service.ResourceError as error:
         db.rollback()
-        if persisted_key:
+        if persisted_key and not committed:
             try:
                 resource_service._storage_path(persisted_key).unlink(missing_ok=True)
             except resource_service.ResourceError:
@@ -192,7 +222,7 @@ async def create_resource(
         raise _resource_error(error) from error
     except Exception:
         db.rollback()
-        if persisted_key:
+        if persisted_key and not committed:
             try:
                 resource_service._storage_path(persisted_key).unlink(missing_ok=True)
             except resource_service.ResourceError:
@@ -204,18 +234,22 @@ async def create_resource(
 
 @mentor_router.delete("/{resource_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete own resource / 删除我的资源")
 def delete_resource(resource_id: UUID, db: DbSession, mentor: User = Depends(require_roles("mentor"))) -> None:
-    resource = resource_service.get_resource(db, tenant_id=mentor.tenant_id, resource_id=resource_id)
+    resource = resource_service.get_resource(db, tenant_id=mentor.tenant_id, resource_id=resource_id, lock=True)
     if resource is None or resource.owner_user_id != mentor.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "resource_not_found"})
     file_size = resource.file_size_bytes
     try:
-        resource_service.delete_stored_file(resource)
+        path = resource_service.file_path(resource)
     except resource_service.ResourceError as error:
         raise _resource_error(error) from error
-    quota = resource_service.quota_snapshot(db, mentor.id)
-    quota.used_bytes = max(0, quota.used_bytes - file_size)
+    resource_service.release_file_bytes(db, mentor.id, file_size)
     db.delete(resource)
     db.commit()
+    if path is not None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Unable to remove file for deleted resource %s", resource_id)
 
 
 @admin_router.get("", response_model=AdminResourceQuotaListResponse, summary="List mentor resource quotas / 查询导师资源配额")

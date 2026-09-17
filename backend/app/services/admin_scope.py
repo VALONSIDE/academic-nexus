@@ -57,7 +57,7 @@ def can_manage_institution(db: Session, admin: User, institution_abbr: str | Non
 
 
 def can_manage_user(db: Session, admin: User, user: User) -> bool:
-    return can_manage_institution(db, admin, user_institution_abbr(user))
+    return admin.tenant_id == user.tenant_id and can_manage_institution(db, admin, user_institution_abbr(user))
 
 
 def has_any_institution_scope(db: Session, admin: User, institutions: Iterable[str]) -> bool:

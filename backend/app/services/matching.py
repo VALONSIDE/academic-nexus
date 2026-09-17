@@ -1,10 +1,4 @@
-"""Cold-start-safe, explainable matching built from academic portraits.
-
-The first production algorithm deliberately relies on explicit portrait tags and
-transparent text signals.  It avoids pretending that a sparse pilot dataset is
-a trained model, while keeping this service boundary ready for embeddings and a
-vector store in a later iteration.
-"""
+"""Academic matching with semantic ranking and explainable local fallback."""
 
 from __future__ import annotations
 
@@ -15,9 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.user import MentorProfile, StudentProfile, User
+from app.services import ranking
 
 
-ALGORITHM_VERSION = "profile-hybrid-v1"
+ALGORITHM_VERSION = ranking.ALGORITHM_VERSION
 _TERM_SPLIT = re.compile(r"[,，;；、|/\n\r]+")
 _WORD_PATTERN = re.compile(r"[a-z0-9+#._-]+", re.IGNORECASE)
 
@@ -33,6 +28,7 @@ class MatchFactor:
 class ScoredMatch:
     score: int
     factors: list[MatchFactor]
+    ranking_mode: str = "local"
 
 
 def _phrases(values: list[str] | None, *texts: str | None) -> set[str]:
@@ -95,52 +91,44 @@ def score_student_to_mentor(student: StudentProfile, mentor: MentorProfile) -> S
     return ScoredMatch(score=score, factors=factors)
 
 
-def _active_users_with_role(db: Session, *, tenant_id, role: str) -> list[User]:
+def _active_users_with_role(db: Session, *, tenant_id, role: str, institution: str) -> list[User]:
+    profile_type = MentorProfile if role == "mentor" else StudentProfile
     statement = (
         select(User)
+        .join(profile_type, profile_type.user_id == User.id)
         .options(selectinload(User.student_profile), selectinload(User.mentor_profile))
         .where(User.tenant_id == tenant_id, User.is_active.is_(True), User.roles.any(code=role))
+        .where(profile_type.institution_abbr == institution, profile_type.profile_completed_at.is_not(None))
     )
     return list(db.scalars(statement).unique().all())
 
 
-def mentor_recommendations(db: Session, student_user: User, *, limit: int | None = None) -> list[tuple[User, ScoredMatch]]:
-    if student_user.student_profile is None:
+def _recommend(db, source, *, source_role, target_role, limit):
+    profile = getattr(source, f"{source_role}_profile")
+    if profile is None or not profile.institution_abbr:
         return []
-    recommendations = [
-        (mentor_user, score_student_to_mentor(student_user.student_profile, mentor_user.mentor_profile))
-        for mentor_user in _active_users_with_role(db, tenant_id=student_user.tenant_id, role="mentor")
-        if mentor_user.mentor_profile is not None
-        and mentor_user.mentor_profile.university == student_user.student_profile.university
-    ]
-    ordered = sorted(
-        recommendations,
-        key=lambda item: (
-            item[0].mentor_profile.department != student_user.student_profile.department,
-            -item[1].score,
-            item[0].full_name,
-            item[0].username or "",
-        ),
-    )
+    matches = []
+    candidates = []
+    for target in _active_users_with_role(db, tenant_id=source.tenant_id, role=target_role, institution=profile.institution_abbr):
+        target_profile = getattr(target, f"{target_role}_profile")
+        if (target_profile is None or target_profile.institution_abbr != profile.institution_abbr
+                or target_profile.profile_completed_at is None or target.id == source.id):
+            continue
+        student, mentor = (profile, target_profile) if source_role == "student" else (target_profile, profile)
+        score = score_student_to_mentor(student, mentor)
+        matches.append((target, score))
+        candidates.append(ranking.Candidate(str(target.id), ranking.academic_text(target_profile, target), score.score))
+    result = ranking.rank(db, source.tenant_id, ranking.academic_text(profile, source), candidates)
+    ordered = [(target, ScoredMatch(result.scores[str(target.id)], score.factors, result.mode)) for target, score in matches]
+    # Academic fit first; a real, non-empty shared department only breaks ties.
+    ordered.sort(key=lambda item: (-item[1].score,
+        not (profile.department and getattr(item[0], f"{target_role}_profile").department == profile.department), str(item[0].id)))
     return ordered[:limit] if limit is not None else ordered
+
+
+def mentor_recommendations(db: Session, student_user: User, *, limit: int | None = None) -> list[tuple[User, ScoredMatch]]:
+    return _recommend(db, student_user, source_role="student", target_role="mentor", limit=limit)
 
 
 def student_candidates(db: Session, mentor_user: User, *, limit: int | None = None) -> list[tuple[User, ScoredMatch]]:
-    if mentor_user.mentor_profile is None:
-        return []
-    candidates = [
-        (student_user, score_student_to_mentor(student_user.student_profile, mentor_user.mentor_profile))
-        for student_user in _active_users_with_role(db, tenant_id=mentor_user.tenant_id, role="student")
-        if student_user.student_profile is not None
-        and student_user.student_profile.university == mentor_user.mentor_profile.university
-    ]
-    ordered = sorted(
-        candidates,
-        key=lambda item: (
-            item[0].student_profile.department != mentor_user.mentor_profile.department,
-            -item[1].score,
-            item[0].full_name,
-            item[0].username or "",
-        ),
-    )
-    return ordered[:limit] if limit is not None else ordered
+    return _recommend(db, mentor_user, source_role="mentor", target_role="student", limit=limit)

@@ -17,7 +17,7 @@ def _users(db: Session):
     mentor = User(tenant_id=tenant.id, username="TEST_T1", full_name="Mentor", password_hash="hash")
     student.roles.append(student_role); mentor.roles.append(mentor_role)
     db.add_all([student_role, mentor_role, student, mentor]); db.flush()
-    db.add_all([StudentProfile(user_id=student.id, research_interests=["AI"], skills=["Python"]), MentorProfile(user_id=mentor.id, research_directions=["AI"], representative_papers=[])])
+    db.add_all([StudentProfile(user_id=student.id, institution_abbr="TEST", research_interests=["AI"], skills=["Python"]), MentorProfile(user_id=mentor.id, institution_abbr="TEST", research_directions=["AI"], representative_papers=[])])
     db.flush()
     return tenant, student, mentor
 
@@ -57,7 +57,7 @@ def test_a_confirmed_student_cannot_consume_another_mentor_capacity() -> None:
         other = User(tenant_id=tenant.id, username="TEST_T2", full_name="Other Mentor", password_hash="hash")
         role = db.scalar(select(Role).where(Role.code == "mentor"))
         other.roles.append(role)
-        db.add(other); db.flush(); db.add(MentorProfile(user_id=other.id, research_directions=["AI"], representative_papers=[])); db.flush()
+        db.add(other); db.flush(); db.add(MentorProfile(user_id=other.id, institution_abbr="TEST", research_directions=["AI"], representative_papers=[])); db.flush()
         tenant_settings(db, tenant.id)
         selection = student_choose(db, student, mentor.id, None)
         mentor_confirm(db, mentor, selection.id, None)
@@ -78,7 +78,7 @@ def test_student_choice_override_allows_multiple_choices_and_cancels_the_exact_r
         other = User(tenant_id=tenant.id, username="TEST_T2", full_name="Other Mentor", password_hash="hash")
         other.roles.append(mentor_role)
         db.add(other); db.flush()
-        db.add(MentorProfile(user_id=other.id, research_directions=["AI"], representative_papers=[])); db.flush()
+        db.add(MentorProfile(user_id=other.id, institution_abbr="TEST", research_directions=["AI"], representative_papers=[])); db.flush()
         settings = tenant_settings(db, tenant.id); settings.default_student_choice_limit = 1
         first = student_choose(db, student, mentor.id, None)
         try:

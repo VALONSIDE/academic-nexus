@@ -1,7 +1,6 @@
 """Dashboard metrics derived from real platform state, not placeholder copy."""
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.ai import AiProjectDailyUsage, AiUsageEvent
@@ -47,9 +46,9 @@ def _selection_data(db: DbSession, user: User, role: str, institutions: set[str]
     if role == "admin" and institutions is not None:
         student_ids, mentor_ids = _institution_user_id_queries(institutions)
         statement = statement.where(or_(MentorSelection.student_user_id.in_(student_ids), MentorSelection.mentor_user_id.in_(mentor_ids)))
-    rows = db.scalars(statement.order_by(MentorSelection.updated_at.desc())).all()
     counts = {code: 0 for code in ("pending_student", "pending_mentor", "confirmed", "rejected", "cancelled")}
-    for row in rows: counts[row.status] = counts.get(row.status, 0) + 1
+    counts.update(dict(db.execute(statement.with_only_columns(MentorSelection.status, func.count(MentorSelection.id)).group_by(MentorSelection.status)).all()))
+    rows = db.scalars(statement.order_by(MentorSelection.updated_at.desc()).limit(8)).all()
     user_ids = {item.student_user_id for item in rows[:8]} | {item.mentor_user_id for item in rows[:8]}
     names = {item.id: item.full_name for item in db.scalars(select(User).where(User.id.in_(user_ids))).all()} if user_ids else {}
     activity = [DashboardSelectionActivity(id=str(item.id), student_name=names.get(item.student_user_id, ""), mentor_name=names.get(item.mentor_user_id, ""), status=item.status, updated_at=item.updated_at) for item in rows[:8]]
@@ -112,7 +111,6 @@ def read_dashboard(current_user: CurrentUser, db: DbSession) -> DashboardRespons
             recent_selection_activity=recent_activity,
         )
     if role == "student":
-        student = db.scalar(select(User).options(selectinload(User.student_profile)).where(User.id == current_user.id))
         ai_quota = ai_quota_snapshot(db, current_user.id)
         mentors = _count(db, select(func.count(User.id)).where(User.tenant_id == current_user.tenant_id, User.is_active.is_(True), User.roles.any(code="mentor")))
         db.commit()
@@ -129,7 +127,6 @@ def read_dashboard(current_user: CurrentUser, db: DbSession) -> DashboardRespons
             selection_statistics=selection_statistics,
             recent_selection_activity=recent_activity,
         )
-    mentor = db.scalar(select(User).options(selectinload(User.mentor_profile)).where(User.id == current_user.id))
     ai_quota = ai_quota_snapshot(db, current_user.id)
     resource_quota = resource_quota_snapshot(db, current_user.id)
     candidates = _count(db, select(func.count(User.id)).where(User.tenant_id == current_user.tenant_id, User.is_active.is_(True), User.roles.any(code="student")))

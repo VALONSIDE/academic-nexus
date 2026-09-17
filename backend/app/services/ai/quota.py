@@ -45,7 +45,8 @@ def current_usage_date() -> date:
 def _quota(db: Session, user_id, *, lock: bool = False) -> AiUserQuota | None:
     statement = select(AiUserQuota).where(AiUserQuota.user_id == user_id)
     if lock:
-        statement = statement.with_for_update()
+        db.flush()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     return db.scalar(statement)
 
 
@@ -89,7 +90,8 @@ def _user_daily_usage(db: Session, user_id, usage_date: date, *, lock: bool = Fa
         AiUserDailyUsage.usage_date == usage_date,
     )
     if lock:
-        statement = statement.with_for_update()
+        db.flush()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     usage = db.scalar(statement)
     if usage is None:
         if _is_postgresql(db):
@@ -108,7 +110,8 @@ def _user_daily_usage(db: Session, user_id, usage_date: date, *, lock: bool = Fa
 def _project_daily_usage(db: Session, usage_date: date, *, lock: bool = False) -> AiProjectDailyUsage:
     statement = select(AiProjectDailyUsage).where(AiProjectDailyUsage.usage_date == usage_date)
     if lock:
-        statement = statement.with_for_update()
+        db.flush()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     usage = db.scalar(statement)
     if usage is None:
         if _is_postgresql(db):
@@ -135,7 +138,6 @@ def quota_snapshot(db: Session, user_id) -> QuotaSnapshot:
     quota = _quota(db, user_id)
     if quota is None:  # Defensive: subscription_snapshot always synchronizes it.
         quota = ensure_user_quota(db, user_id)
-    user_usage = _user_daily_usage(db, user_id, usage_date)
     project_usage = _project_daily_usage(db, usage_date)
     settings = get_settings()
     # Keep the historical response fields for old clients, but their values now
@@ -203,28 +205,36 @@ def reserve_ai_call(
     return event
 
 
-def complete_ai_call(db: Session, event_id, *, input_tokens: int | None, output_tokens: int | None) -> None:
-    event = db.scalar(select(AiUsageEvent).where(AiUsageEvent.id == event_id).with_for_update())
+def complete_ai_call(db: Session, event_id, *, input_tokens: int | None, output_tokens: int | None, commit: bool = True) -> None:
+    event = db.scalar(select(AiUsageEvent).where(AiUsageEvent.id == event_id).with_for_update().execution_options(populate_existing=True))
     if event is None or event.status != "reserved":
         return
     event.status = "completed"
     event.input_tokens = input_tokens
     event.output_tokens = output_tokens
     event.completed_at = datetime.now(timezone.utc)
-    db.commit()
+    if commit:
+        db.commit()
 
 
 def release_ai_call(db: Session, event_id, *, error_code: str) -> None:
     """Refund a pre-reserved call if no provider response was produced."""
-    event = db.scalar(select(AiUsageEvent).where(AiUsageEvent.id == event_id).with_for_update())
+    event = db.scalar(select(AiUsageEvent).where(AiUsageEvent.id == event_id).with_for_update().execution_options(populate_existing=True))
     if event is None or event.status != "reserved":
         return
+    user = db.get(User, event.user_id)
+    if user is None:
+        return
+    subscription = refresh_subscription(db, user, lock=True)
     quota = _quota(db, event.user_id, lock=True)
     if quota is None:
         quota = ensure_user_quota(db, event.user_id, lock=True)
     user_usage = _user_daily_usage(db, event.user_id, event.usage_date, lock=True)
     project_usage = _project_daily_usage(db, event.usage_date, lock=True)
-    quota.credit_balance += event.credit_cost
+    event_time = event.created_at.replace(tzinfo=timezone.utc) if event.created_at.tzinfo is None else event.created_at
+    cycle_start = subscription.cycle_started_at.replace(tzinfo=timezone.utc) if subscription.cycle_started_at.tzinfo is None else subscription.cycle_started_at
+    if event_time >= cycle_start:
+        quota.credit_balance = min(subscription.credit_limit, quota.credit_balance + event.credit_cost)
     user_usage.calls_used = max(0, user_usage.calls_used - event.credit_cost)
     project_usage.calls_used = max(0, project_usage.calls_used - event.credit_cost)
     event.status = "failed"

@@ -7,10 +7,12 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models.selection import MentorSelection, MentorSelectionSetting, SelectionSettings, StudentSelectionSetting
 from app.models.user import User
+from app.services.admin_scope import user_institution_abbr
 
 ACTIVE = ("pending_student", "pending_mentor")
 
@@ -22,9 +24,13 @@ def _error(code: str, http_status: int = status.HTTP_409_CONFLICT) -> None:
 def tenant_settings(db: Session, tenant_id: UUID, *, lock: bool = False) -> SelectionSettings:
     statement = select(SelectionSettings).where(SelectionSettings.tenant_id == tenant_id)
     if lock:
-        statement = statement.with_for_update()
+        db.flush()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     item = db.scalar(statement)
     if item is None:
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(pg_insert(SelectionSettings).values(tenant_id=tenant_id).on_conflict_do_nothing(index_elements=["tenant_id"]))
+            return db.scalars(statement).one()
         item = SelectionSettings(tenant_id=tenant_id)
         db.add(item)
         db.flush()
@@ -34,9 +40,13 @@ def tenant_settings(db: Session, tenant_id: UUID, *, lock: bool = False) -> Sele
 def mentor_settings(db: Session, mentor_id: UUID, default_capacity: int, *, lock: bool = False) -> MentorSelectionSetting:
     statement = select(MentorSelectionSetting).where(MentorSelectionSetting.mentor_user_id == mentor_id)
     if lock:
-        statement = statement.with_for_update()
+        db.flush()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     item = db.scalar(statement)
     if item is None:
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(pg_insert(MentorSelectionSetting).values(mentor_user_id=mentor_id).on_conflict_do_nothing(index_elements=["mentor_user_id"]))
+            return db.scalars(statement).one()
         item = MentorSelectionSetting(mentor_user_id=mentor_id)
         db.add(item)
         db.flush()
@@ -46,9 +56,13 @@ def mentor_settings(db: Session, mentor_id: UUID, default_capacity: int, *, lock
 def student_settings(db: Session, student_id: UUID, *, lock: bool = False) -> StudentSelectionSetting:
     statement = select(StudentSelectionSetting).where(StudentSelectionSetting.student_user_id == student_id)
     if lock:
-        statement = statement.with_for_update()
+        db.flush()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     item = db.scalar(statement)
     if item is None:
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(pg_insert(StudentSelectionSetting).values(student_user_id=student_id).on_conflict_do_nothing(index_elements=["student_user_id"]))
+            return db.scalars(statement).one()
         item = StudentSelectionSetting(student_user_id=student_id)
         db.add(item)
         db.flush()
@@ -127,7 +141,9 @@ def _confirm(db: Session, selection: MentorSelection) -> MentorSelection:
 
 def student_choose(db: Session, student: User, mentor_id: UUID, note: str | None) -> MentorSelection:
     settings = _ensure_open(db, student.tenant_id)
-    _get_role_user(db, mentor_id, student.tenant_id, "mentor", lock=True)
+    mentor = _get_role_user(db, mentor_id, student.tenant_id, "mentor", lock=True)
+    if not user_institution_abbr(student) or user_institution_abbr(student) != user_institution_abbr(mentor):
+        _error("institution_scope_forbidden", status.HTTP_403_FORBIDDEN)
     mentor_setting = mentor_settings(db, mentor_id, settings.default_capacity, lock=True)
     existing = db.scalar(select(MentorSelection).where(MentorSelection.student_user_id == student.id, MentorSelection.mentor_user_id == mentor_id).with_for_update())
     confirmed_existing = db.scalar(select(MentorSelection.id).where(MentorSelection.student_user_id == student.id, MentorSelection.status == "confirmed").with_for_update())
@@ -137,9 +153,9 @@ def student_choose(db: Session, student: User, mentor_id: UUID, note: str | None
         _error("already_confirmed")
     if existing and existing.status == "pending_mentor":
         return _confirm(db, existing)
+    if existing is None or existing.status != "pending_student":
+        _assert_student_choice_available(db, student.id, settings)
     if mentor_setting.selection_mode == "first_come":
-        if existing is None:
-            _assert_student_choice_available(db, student.id, settings)
         _reserve_available(db, mentor_id, mentor_setting, settings.default_capacity)
         if existing is None:
             existing = MentorSelection(tenant_id=student.tenant_id, student_user_id=student.id, mentor_user_id=mentor_id, status="pending_student", student_note=note)
@@ -149,7 +165,6 @@ def student_choose(db: Session, student: User, mentor_id: UUID, note: str | None
             existing.status, existing.student_note = "pending_student", note
         return _confirm(db, existing)
     if existing is None:
-        _assert_student_choice_available(db, student.id, settings)
         existing = MentorSelection(tenant_id=student.tenant_id, student_user_id=student.id, mentor_user_id=mentor_id, status="pending_student", student_note=note)
         db.add(existing)
         db.flush()
@@ -178,7 +193,9 @@ def student_cancel(db: Session, student: User, selection_id: UUID | None = None)
 
 def mentor_invite(db: Session, mentor: User, student_id: UUID, note: str | None) -> MentorSelection:
     settings = _ensure_open(db, mentor.tenant_id)
-    _get_role_user(db, student_id, mentor.tenant_id, "student", lock=True)
+    student = _get_role_user(db, student_id, mentor.tenant_id, "student", lock=True)
+    if not user_institution_abbr(mentor) or user_institution_abbr(mentor) != user_institution_abbr(student):
+        _error("institution_scope_forbidden", status.HTTP_403_FORBIDDEN)
     if db.scalar(select(MentorSelection.id).where(MentorSelection.student_user_id == student_id, MentorSelection.status == "confirmed").with_for_update()):
         _error("student_already_matched")
     mentor_setting = mentor_settings(db, mentor.id, settings.default_capacity, lock=True)

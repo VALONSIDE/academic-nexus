@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DbSession, require_roles, require_super_admin
-from app.models.selection import MentorSelection, MentorSelectionSetting, StudentSelectionSetting
+from app.models.selection import MentorSelection
 from app.models.user import User
 from app.schemas.selection import (
     AdminSelectionBulkReleaseRequest, AdminSelectionRecordListResponse, AdminSelectionRecordResponse, AdminSelectionUserResponse, AdminSelectionUserUpdate, MentorSelectionSettingsResponse, MentorSelectionSettingsUpdate, NotePayload,

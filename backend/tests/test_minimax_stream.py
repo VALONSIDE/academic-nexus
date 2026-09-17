@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from app.services.ai import minimax
 
@@ -25,8 +26,16 @@ def test_stream_completion_emits_public_text_but_not_provider_thinking(monkeypat
             type="message_delta",
             usage=SimpleNamespace(output_tokens=9),
         ),
+        SimpleNamespace(type="message_stop"),
     ]
-    client = SimpleNamespace(messages=SimpleNamespace(create=lambda **_: chunks))
+    class Stream:
+        close = Mock()
+
+        def __iter__(self):
+            return iter(chunks)
+
+    stream = Stream()
+    client = SimpleNamespace(messages=SimpleNamespace(create=lambda **_: stream), close=Mock())
     monkeypatch.setattr(minimax, "_client", lambda: client)
 
     events = list(
@@ -41,3 +50,5 @@ def test_stream_completion_emits_public_text_but_not_provider_thinking(monkeypat
     assert events[-1].completed is True
     assert events[-1].input_tokens == 12
     assert events[-1].output_tokens == 9
+    stream.close.assert_called_once()
+    client.close.assert_called_once()

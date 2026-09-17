@@ -193,7 +193,7 @@ onBeforeUnmount(clearSensitiveState)
       <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div class="border-b border-slate-200 bg-slate-950 px-6 py-7 text-white sm:px-8">
           <div class="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-            <div><div class="flex items-center gap-2 text-xs font-semibold tracking-[0.16em] text-slate-300"><FileKey2 class="h-4 w-4" />SUBSCRIPTION DELIVERY / OFFLINE</div><h1 class="mt-3 text-3xl font-semibold tracking-tight">{{ t('subscriptionDeliveryTitle') }}</h1><p class="mt-3 max-w-3xl text-sm leading-6 text-slate-300">{{ t('subscriptionDeliveryDescription') }}</p></div>
+            <div><div class="flex items-center gap-2 text-xs font-semibold tracking-[0.16em] text-slate-300"><FileKey2 class="h-4 w-4" />SUBSCRIPTION DELIVERY / OFFLINE</div><h1 class="mt-3 text-3xl font-semibold tracking-tight">{{ t('subscriptionDeliveryTitle') }}</h1></div>
             <span class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-xs text-slate-100"><ShieldAlert class="h-4 w-4" />{{ t('subscriptionDeliveryBrowserOnly') }}</span>
           </div>
         </div>

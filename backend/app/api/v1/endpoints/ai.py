@@ -1,4 +1,5 @@
 import json
+from contextlib import closing
 from collections.abc import Iterator
 from typing import Literal
 from uuid import UUID
@@ -96,7 +97,7 @@ def create_ai_conversation(
     db: DbSession,
     current_user: User = Depends(require_roles("student", "mentor")),
 ) -> AiConversationResponse:
-    return _conversation_response(create_conversation(db, current_user, topic=payload.topic, title=payload.title))
+    return _conversation_response(create_conversation(db, current_user, topic=payload.topic))
 
 
 @router.get("/conversations/{conversation_id}", response_model=AiConversationDetailResponse, summary="Read AI conversation / 获取 AI 会话")
@@ -122,6 +123,11 @@ def rename_ai_conversation(
     conversation = get_conversation(db, current_user, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found / 未找到会话")
+    if not list_messages(db, conversation):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "conversation_not_started"},
+        )
     return _conversation_response(rename_conversation(db, conversation, title=payload.title))
 
 
@@ -150,24 +156,25 @@ def send_ai_message(
     if payload.response_mode == "stream":
         def event_stream() -> Iterator[str]:
             try:
-                for event in stream_message(
+                with closing(stream_message(
                     db,
                     current_user,
                     conversation,
                     content=payload.content,
                     model_tier=payload.model_tier,
-                ):
-                    if event.text:
-                        yield _sse("text", {"text": event.text})
-                    elif event.user_message is not None and event.assistant_message is not None:
-                        snapshot = quota_snapshot(db, current_user.id)
-                        db.commit()
-                        result = AiChatResponse(
-                            user_message=_message_response(event.user_message),
-                            assistant_message=_message_response(event.assistant_message),
-                            quota=_quota_response(snapshot),
-                        )
-                        yield _sse("done", result.model_dump(mode="json"))
+                )) as events:
+                    for event in events:
+                        if event.text:
+                            yield _sse("text", {"text": event.text})
+                        elif event.user_message is not None and event.assistant_message is not None:
+                            snapshot = quota_snapshot(db, current_user.id)
+                            db.commit()
+                            result = AiChatResponse(
+                                user_message=_message_response(event.user_message),
+                                assistant_message=_message_response(event.assistant_message),
+                                quota=_quota_response(snapshot),
+                            )
+                            yield _sse("done", result.model_dump(mode="json"))
             except (AiAssistantError, AiQuotaExceededError) as error:
                 yield _sse("error", {"code": error.code})
 

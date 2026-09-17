@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.auth import ActivationRequest
+from app.schemas.auth import ActivationRequest, ContactUpdateRequest
 from app.schemas.profiles import MentorAcademicProfilePayload, StudentAcademicProfilePayload
 
 
@@ -51,3 +51,11 @@ def test_mentor_portrait_requires_representative_papers() -> None:
             research_projects="National research project",
             mentoring_style="Weekly meetings and milestone feedback.",
         )
+
+
+def test_contact_details_require_a_valid_international_phone_and_email() -> None:
+    contact = ContactUpdateRequest(phone="+86 138 0013 8000", email="Student@Example.edu")
+    assert contact.phone == "+8613800138000"
+    assert contact.email == "student@example.edu"
+    with pytest.raises(ValidationError):
+        ContactUpdateRequest(phone="13800138000", email="not-an-email")

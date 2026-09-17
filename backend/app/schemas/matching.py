@@ -53,11 +53,13 @@ class MatchedStudentResponse(BaseModel):
 
 class MentorRecommendationListResponse(BaseModel):
     algorithm_version: str
+    ranking_mode: Literal["local", "semantic", "hybrid"] = "local"
     total: int
     items: list[MatchedMentorResponse]
 
 
 class StudentCandidateListResponse(BaseModel):
     algorithm_version: str
+    ranking_mode: Literal["local", "semantic", "hybrid"] = "local"
     total: int
     items: list[MatchedStudentResponse]

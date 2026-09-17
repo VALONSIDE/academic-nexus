@@ -30,7 +30,7 @@ def get_current_user(
     if credentials is None:
         raise unauthorized
     payload = decode_access_token(credentials.credentials)
-    if payload is None or not payload.get("sub"):
+    if payload is None or payload.get("scope") != "authenticated" or not payload.get("sub"):
         raise unauthorized
     try:
         user_id = uuid.UUID(payload["sub"])
@@ -76,8 +76,13 @@ def get_pending_registration_user(
         or payload.get("auth_version") != user.auth_version
     ):
         raise unauthorized
-    pre_registration = db.scalar(select(PreRegistration).where(PreRegistration.id == user.pre_registration_id))
+    pre_registration = db.scalar(select(PreRegistration).where(PreRegistration.id == user.pre_registration_id).with_for_update().execution_options(populate_existing=True))
     if pre_registration is None or pre_registration.status != "issued":
+        raise unauthorized
+    # Activation restarts use the same receipt lock; recheck the token after
+    # acquiring it so a request cannot finish with a superseded password/session.
+    db.refresh(user)
+    if user.is_active or payload.get("auth_version") != user.auth_version:
         raise unauthorized
     return user
 

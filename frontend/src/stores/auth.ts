@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 
-import { authApi } from '@/api/client'
+import { ApiError, authApi } from '@/api/client'
 import { i18n } from '@/i18n'
 import type {
   ActivationPayload,
@@ -46,12 +46,16 @@ const registration = ref<RegistrationSession | null>(storedRegistration())
 
 function persist(result: AuthResponse) {
   state.token = result.access_token
-  state.user = result.user
   window.localStorage.setItem(tokenKey, result.access_token)
-  window.localStorage.setItem(userKey, JSON.stringify(result.user))
-  i18n.global.locale.value = result.user.preferred_locale
-  window.localStorage.setItem('academicnexus.locale', result.user.preferred_locale)
-  document.documentElement.lang = result.user.preferred_locale
+  persistUser(result.user)
+}
+
+function persistUser(user: User) {
+  state.user = user
+  window.localStorage.setItem(userKey, JSON.stringify(user))
+  i18n.global.locale.value = user.preferred_locale
+  window.localStorage.setItem('academicnexus.locale', user.preferred_locale)
+  document.documentElement.lang = user.preferred_locale
 }
 
 export function useAuthStore() {
@@ -73,11 +77,12 @@ export function useAuthStore() {
   async function completeRegistration(
     role: 'student' | 'mentor',
     payload: StudentAcademicProfile | MentorAcademicProfile,
+    contact: { phone: string; email: string },
   ) {
     if (!registration.value || registration.value.role !== role) throw new Error('Registration session expired')
     const result = role === 'student'
-      ? await authApi.completeStudentRegistration(registration.value.token, payload as StudentAcademicProfile)
-      : await authApi.completeMentorRegistration(registration.value.token, payload as MentorAcademicProfile)
+      ? await authApi.completeStudentRegistration(registration.value.token, payload as StudentAcademicProfile, contact)
+      : await authApi.completeMentorRegistration(registration.value.token, payload as MentorAcademicProfile, contact)
     persist(result)
     registration.value = null
     window.sessionStorage.removeItem(registrationKey)
@@ -85,14 +90,17 @@ export function useAuthStore() {
   }
 
   async function refreshUser() {
-    if (!state.token) return null
+    const requestToken = state.token
+    if (!requestToken) return null
     try {
-      state.user = await authApi.me(state.token)
-      window.localStorage.setItem(userKey, JSON.stringify(state.user))
+      const user = await authApi.me(requestToken)
+      if (state.token !== requestToken) return state.user
+      persistUser(user)
+      return user
+    } catch (error) {
+      if (state.token !== requestToken) return state.user
+      if (error instanceof ApiError && error.status === 401) logout()
       return state.user
-    } catch {
-      logout()
-      return null
     }
   }
 
@@ -100,6 +108,13 @@ export function useAuthStore() {
     if (!state.token || !state.user) return
     state.user = await authApi.updateLocale(state.token, locale)
     window.localStorage.setItem(userKey, JSON.stringify(state.user))
+  }
+
+  async function updateContact(contact: { phone: string; email: string }) {
+    if (!state.token) throw new Error('Authentication required')
+    const user = await authApi.updateContact(state.token, contact)
+    persistUser(user)
+    return user
   }
 
   async function changePassword(currentPassword: string, newPassword: string) {
@@ -118,5 +133,5 @@ export function useAuthStore() {
     window.sessionStorage.removeItem(registrationKey)
   }
 
-  return { state, registration, isAuthenticated, login, startActivation, completeRegistration, refreshUser, setLocale, changePassword, logout }
+  return { state, registration, isAuthenticated, login, startActivation, completeRegistration, refreshUser, setLocale, updateContact, changePassword, logout }
 }

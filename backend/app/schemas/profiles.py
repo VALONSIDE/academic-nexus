@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.auth import Locale, UserResponse, validate_password_strength
+from app.schemas.auth import Locale, UserResponse, normalize_email, normalize_phone, validate_password_strength
 
 
 def _normalize_tags(values: list[str]) -> list[str]:
@@ -66,6 +66,36 @@ class MentorAcademicProfilePayload(BaseModel):
         return normalized
 
 
+class StudentRegistrationCompleteRequest(StudentAcademicProfilePayload):
+    phone: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=320)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, phone: str | None) -> str | None:
+        return normalize_phone(phone)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, email: str | None) -> str | None:
+        return normalize_email(email)
+
+
+class MentorRegistrationCompleteRequest(MentorAcademicProfilePayload):
+    phone: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=320)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, phone: str | None) -> str | None:
+        return normalize_phone(phone)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, email: str | None) -> str | None:
+        return normalize_email(email)
+
+
 class AcademicProfileResponse(BaseModel):
     role: str
     profile_completed: bool
@@ -74,7 +104,6 @@ class AcademicProfileResponse(BaseModel):
 
 
 class ManagedUserResponse(UserResponse):
-    phone: str | None = None
     role: str
     academic_id: str | None = None
     institution_abbr: str | None = None
@@ -87,15 +116,26 @@ class ManagedUserResponse(UserResponse):
 class AdminUserUpdateRequest(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
     phone: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=320)
     preferred_locale: Locale | None = None
     is_active: bool | None = None
     student_profile: StudentAcademicProfilePayload | None = None
     mentor_profile: MentorAcademicProfilePayload | None = None
 
-    @field_validator("full_name", "phone")
+    @field_validator("full_name")
     @classmethod
     def trim_optional_text(cls, value: str | None) -> str | None:
         return value.strip() if value is not None else None
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, phone: str | None) -> str | None:
+        return normalize_phone(phone)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, email: str | None) -> str | None:
+        return normalize_email(email)
 
 
 class AdminUserBatchUpdateRequest(BaseModel):

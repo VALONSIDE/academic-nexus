@@ -5,6 +5,8 @@ export interface User {
   id: string
   username: string
   full_name: string
+  phone: string | null
+  email: string | null
   preferred_locale: Locale
   is_active: boolean
   roles: Role[]
@@ -97,6 +99,7 @@ export interface PreRegistrationAccountListResponse {
 export interface AdminUserUpdatePayload {
   full_name?: string
   phone?: string
+  email?: string
   preferred_locale?: Locale
   is_active?: boolean
   student_profile?: StudentAcademicProfile
@@ -273,12 +276,14 @@ export interface MatchedStudent {
 
 export interface MentorRecommendationListResponse {
   algorithm_version: string
+  ranking_mode: 'local' | 'semantic' | 'hybrid'
   total: number
   items: MatchedMentor[]
 }
 
 export interface StudentCandidateListResponse {
   algorithm_version: string
+  ranking_mode: 'local' | 'semantic' | 'hybrid'
   total: number
   items: MatchedStudent[]
 }
@@ -303,6 +308,7 @@ export interface LearningResource {
 }
 
 export interface LearningResourceListResponse {
+  ranking_mode?: 'local' | 'semantic' | 'hybrid' | null
   items: LearningResource[]
   total: number
 }

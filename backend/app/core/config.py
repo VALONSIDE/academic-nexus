@@ -1,6 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,7 +24,7 @@ class Settings(BaseSettings):
     api_docs_enabled: bool = False
     # Product release label shown by OpenAPI and operational tooling.
     # NR means Not Released / 尚未发布.
-    app_version: str = "alpha-0823-NR"
+    app_version: str = "alpha-0917-NR"
     database_url: str = "postgresql+psycopg://academicnexus:academicnexus@localhost:5432/academicnexus"
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret_key: str
@@ -40,6 +42,17 @@ class Settings(BaseSettings):
     minimax_light_model: str = "MiniMax-M2.5-highspeed"
     minimax_standard_model: str = "MiniMax-M2.7"
     minimax_expert_model: str = "MiniMax-M3"
+    siliconflow_api_key: SecretStr = SecretStr("")
+    siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
+    # Restrict this integration to the free models explicitly selected by the owner.
+    siliconflow_embedding_model: Literal["BAAI/bge-m3"] = "BAAI/bge-m3"
+    siliconflow_rerank_model: Literal["BAAI/bge-reranker-v2-m3"] = "BAAI/bge-reranker-v2-m3"
+    ranking_enabled: bool = True
+    ranking_timeout_seconds: float = Field(default=15, ge=1, le=60)
+    ranking_candidate_limit: int = Field(default=200, ge=10, le=1000)
+    ranking_rerank_limit: int = Field(default=40, ge=1, le=100)
+    ranking_cache_ttl_seconds: int = Field(default=900, ge=30, le=86400)
+    ranking_embedding_ttl_days: int = Field(default=30, ge=1, le=90)
     ai_daily_project_limit: int = 500
     # Legacy-named quota columns are synchronized to the subscription-cycle
     # allowance. Every account starts with ten normal-plan credits per cycle.

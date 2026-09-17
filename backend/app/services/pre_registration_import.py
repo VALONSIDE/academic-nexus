@@ -34,6 +34,7 @@ ABBR_PATTERN = re.compile(r"^[A-Za-z0-9]{2,12}$")
 ACADEMIC_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 MAX_XLSX_ARCHIVE_ENTRIES = 1000
 MAX_XLSX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+MAX_IMPORT_ROWS = 1000
 
 
 class PreRegistrationImportError(ValueError):
@@ -92,14 +93,25 @@ def parse_import_workbook(content: bytes) -> list[PreparedRow]:
         workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
     except Exception as error:
         raise PreRegistrationImportError([f"无法读取 Excel 文件 / Unable to read Excel: {type(error).__name__}"]) from error
+    try:
+        return _parse_import_rows(workbook)
+    finally:
+        workbook.close()
+
+
+def _parse_import_rows(workbook) -> list[PreparedRow]:
     if TEMPLATE_SHEET not in workbook.sheetnames:
         raise PreRegistrationImportError([f"缺少工作表“{TEMPLATE_SHEET}” / Required worksheet is missing"])
     sheet = workbook[TEMPLATE_SHEET]
-    actual_headers = tuple(_cell_text(cell.value) for cell in next(sheet.iter_rows(min_row=1, max_row=1)))
+    # Ignore attacker-controlled worksheet dimensions and bound both axes.
+    sheet.reset_dimensions()
+    actual_headers = tuple(_cell_text(cell.value) for cell in next(sheet.iter_rows(min_row=1, max_row=1, max_col=len(TEMPLATE_HEADERS))))
     if actual_headers[:len(TEMPLATE_HEADERS)] != TEMPLATE_HEADERS:
         raise PreRegistrationImportError(["模板列不匹配，请下载并使用最新模板 / Template columns do not match"])
     errors: list[str] = []; prepared: list[PreparedRow] = []; seen: set[str] = set()
     for number, row in enumerate(sheet.iter_rows(min_row=2, max_col=len(TEMPLATE_HEADERS), values_only=True), start=2):
+        if number > MAX_IMPORT_ROWS + 1:
+            raise PreRegistrationImportError([f"每次最多导入 {MAX_IMPORT_ROWS} 行 / Import row limit exceeded"])
         values = [_cell_text(value) for value in row]
         if not any(values): continue
         abbr, institution, college, raw_role, name, academic_id = values

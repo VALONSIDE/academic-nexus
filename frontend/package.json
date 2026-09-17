@@ -1,6 +1,6 @@
 {
   "name": "academicnexus-web",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.0917NR",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dompurify": "3.4.14",
+    "libphonenumber-js": "^1.13.13",
     "lucide-vue-next": "^0.544.0",
     "reka-ui": "^2.5.0",
     "tailwind-merge": "^3.3.0",
@@ -31,7 +32,7 @@
     "tailwindcss": "^4.1.13",
     "typescript": "~5.9.2",
     "vite": "^7.1.5",
-    "vitest": "^3.2.4",
+    "vitest": "^4.1.11",
     "vue-tsc": "^3.0.7"
   }
 }

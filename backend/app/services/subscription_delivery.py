@@ -78,7 +78,10 @@ def extract_subscription_keys_from_workbook(content: bytes) -> list[ImportedSubs
     seen: set[str] = set()
     try:
         for worksheet in workbook.worksheets:
-            for row_number, row in enumerate(worksheet.iter_rows(values_only=True), start=1):
+            worksheet.reset_dimensions()
+            for row_number, row in enumerate(worksheet.iter_rows(max_col=32, values_only=True), start=1):
+                if row_number > 2000:
+                    raise SubscriptionError("subscription_delivery_workbook_invalid")
                 for value in row:
                     if not isinstance(value, str):
                         continue

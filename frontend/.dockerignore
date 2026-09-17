@@ -1,3 +1,11 @@
 node_modules/
 dist/
 coverage/
+.env
+.env.*
+!.env.example
+.git/
+secrets/
+.secrets/
+*.pem
+*.key

@@ -6,7 +6,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DbSession, require_administrator
-from app.api.v1.endpoints.auth import serialize_user
+from app.api.v1.endpoints.auth import ensure_email_available, serialize_user
 from app.api.v1.endpoints.profiles import (
     _mentor_data,
     _student_data,
@@ -44,7 +44,6 @@ def serialize_managed_user(user: User) -> ManagedUserResponse:
         return ManagedUserResponse(
             **serialize_user(user).model_dump(),
             role=role,
-            phone=user.phone,
             academic_id=profile.student_no,
             institution_abbr=profile.institution_abbr,
             institution_name_zh=profile.university,
@@ -57,7 +56,6 @@ def serialize_managed_user(user: User) -> ManagedUserResponse:
         return ManagedUserResponse(
             **serialize_user(user).model_dump(),
             role=role,
-            phone=user.phone,
             academic_id=profile.employee_no,
             institution_abbr=profile.institution_abbr,
             institution_name_zh=profile.university,
@@ -120,8 +118,11 @@ def update_managed_user(
     role = _managed_role(user)
     if payload.full_name is not None:
         user.full_name = payload.full_name
-    if payload.phone is not None:
-        user.phone = payload.phone or None
+    if "phone" in payload.model_fields_set:
+        user.phone = payload.phone
+    if "email" in payload.model_fields_set:
+        ensure_email_available(db, user, payload.email)
+        user.email = payload.email
     if payload.preferred_locale is not None:
         user.preferred_locale = payload.preferred_locale
     if payload.is_active is not None:

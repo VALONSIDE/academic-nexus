@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -55,7 +56,7 @@ def test_recommendations_are_ranked_for_both_student_and_mentor_views() -> None:
         db.add_all(
             [
                 StudentProfile(
-                    user_id=student.id,
+                    user_id=student.id, institution_abbr="TEST", profile_completed_at=datetime.now(timezone.utc),
                     research_interests=["natural language processing"],
                     skills=["Python"],
                     academic_performance="GPA 3.8",
@@ -63,7 +64,7 @@ def test_recommendations_are_ranked_for_both_student_and_mentor_views() -> None:
                     research_experience="NLP project",
                 ),
                 MentorProfile(
-                    user_id=mentor.id,
+                    user_id=mentor.id, institution_abbr="TEST", profile_completed_at=datetime.now(timezone.utc),
                     research_directions=["natural language processing"],
                     representative_papers=["NLP"],
                     research_projects="NLP project",
@@ -83,7 +84,7 @@ def test_recommendations_are_ranked_for_both_student_and_mentor_views() -> None:
         assert mentor_results[0][1].score == student_results[0][1].score
 
 
-def test_same_college_is_prioritized_before_a_higher_scoring_college_match() -> None:
+def test_higher_academic_fit_is_prioritized_before_same_college() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
@@ -99,12 +100,50 @@ def test_same_college_is_prioritized_before_a_higher_scoring_college_match() -> 
         higher_score.roles.append(mentor_role)
         db.add_all([student, same_college, higher_score]); db.flush()
         db.add_all([
-            StudentProfile(user_id=student.id, university="AcademicNexus University", department="College of Computing", research_interests=["NLP"], skills=["Python"]),
-            MentorProfile(user_id=same_college.id, university="AcademicNexus University", department="College of Computing", research_directions=["History"], representative_papers=[]),
-            MentorProfile(user_id=higher_score.id, university="AcademicNexus University", department="College of Design", research_directions=["NLP"], representative_papers=[]),
+            StudentProfile(user_id=student.id, institution_abbr="TEST", profile_completed_at=datetime.now(timezone.utc), university="AcademicNexus University", department="College of Computing", research_interests=["NLP"], skills=["Python"]),
+            MentorProfile(user_id=same_college.id, institution_abbr="TEST", profile_completed_at=datetime.now(timezone.utc), university="AcademicNexus University", department="College of Computing", research_directions=["History"], representative_papers=[]),
+            MentorProfile(user_id=higher_score.id, institution_abbr="TEST", profile_completed_at=datetime.now(timezone.utc), university="AcademicNexus University", department="College of Design", research_directions=["NLP"], representative_papers=[]),
         ])
         db.commit(); db.refresh(student)
 
         results = mentor_recommendations(db, student, limit=10)
 
-        assert [item[0].id for item in results] == [same_college.id, higher_score.id]
+        assert [item[0].id for item in results] == [higher_score.id, same_college.id]
+
+
+def test_matching_filters_before_external_calls_and_paginates(monkeypatch):
+    from app.api.v1.endpoints.matching import recommend_mentors
+    from app.services import ranking
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine, autoflush=False, expire_on_commit=False) as db:
+        organization = Tenant(slug="scope", name="Scope")
+        other = Tenant(slug="other", name="Other")
+        db.add_all([organization, other]); db.flush()
+        mentor_role = Role(tenant_id=organization.id, code="mentor", name_zh="Mentor", name_en="Mentor")
+        source = User(tenant_id=organization.id, username="S1", full_name="Student", password_hash="hash")
+        source.student_profile = StudentProfile(institution_abbr="TEST", research_interests=["language"])
+        db.add(source)
+        for n, (institution, active, complete, tenant_id) in enumerate([
+            ("TEST", True, True, organization.id), ("TEST", True, True, organization.id),
+            ("OTHER", True, True, organization.id), (None, True, True, organization.id),
+            ("TEST", False, True, organization.id), ("TEST", True, False, organization.id),
+            ("TEST", True, True, other.id),
+        ]):
+            target = User(tenant_id=tenant_id, username=f"M{n}", full_name=f"Mentor {n}", password_hash="hash", is_active=active)
+            target.roles.append(mentor_role)
+            target.mentor_profile = MentorProfile(institution_abbr=institution, research_directions=[f"research{n}"],
+                profile_completed_at=datetime.now(timezone.utc) if complete else None)
+            db.add(target)
+        db.commit()
+        def rank(db, tenant_id, query, candidates):
+            assert len(candidates) == 2
+            assert {item.text for item in candidates} == {"research0", "research1"}
+            return ranking.RankingResult({item.id: 50 for item in candidates}, "hybrid")
+        monkeypatch.setattr(ranking, "rank", rank)
+        first = recommend_mentors(db, source, limit=1, offset=0)
+        second = recommend_mentors(db, source, limit=1, offset=1)
+        assert first.total == second.total == 2
+        assert first.ranking_mode == "hybrid"
+        assert first.items[0].user_id != second.items[0].user_id
+        assert not first.items[0].same_college

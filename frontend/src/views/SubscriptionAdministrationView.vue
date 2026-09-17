@@ -166,7 +166,7 @@ onMounted(load)
 <template>
   <DashboardLayout>
     <div class="mx-auto w-full max-w-7xl">
-      <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><p class="text-sm font-medium text-sky-700">{{ t('subscription') }}</p><h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-900">{{ t('subscriptionManagement') }}</h1><p class="mt-3 max-w-3xl leading-7 text-slate-600">{{ isSuperAdmin ? t('superSubscriptionManagementDescription') : t('institutionSubscriptionManagementDescription') }}</p></div><span class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700"><ShieldCheck class="h-4 w-4 text-sky-700" />{{ isSuperAdmin ? t('superAdministrator') : t('institutionAdministrator') }}</span></div>
+      <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><p class="text-sm font-medium text-sky-700">{{ t('subscription') }}</p><h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-900">{{ t('subscriptionManagement') }}</h1><p v-if="!isSuperAdmin" class="mt-3 max-w-3xl leading-7 text-slate-600">{{ t('institutionSubscriptionManagementDescription') }}</p></div><span class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700"><ShieldCheck class="h-4 w-4 text-sky-700" />{{ isSuperAdmin ? t('superAdministrator') : t('institutionAdministrator') }}</span></div>
 
       <div v-if="loading" class="mt-7 rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">{{ t('loading') }}</div>
       <template v-else>

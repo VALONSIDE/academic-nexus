@@ -3,9 +3,10 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Search, UserCog } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
-import { authApi } from '@/api/client'
+import { ApiError, authApi } from '@/api/client'
 import AcademicPortraitForm from '@/components/AcademicPortraitForm.vue'
 import DashboardLayout from '@/components/DashboardLayout.vue'
+import InternationalPhoneInput from '@/components/InternationalPhoneInput.vue'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -27,7 +28,8 @@ const password = ref('')
 const selectionConfig = ref<AdminSelectionUser | null>(null)
 const selectionLimit = ref<number | null>(null)
 const selectionExempt = ref(false)
-const basic = reactive({ full_name: '', phone: '', is_active: true })
+const basic = reactive({ full_name: '', phone: '', email: '', is_active: true })
+const phoneValid = ref(true)
 
 const title = computed(() => props.role === 'student' ? t('studentManagement') : t('mentorManagement'))
 const selectedProfile = computed(() => selected.value?.profile || null)
@@ -40,6 +42,7 @@ function applySelected(user: ManagedUser) {
   selected.value = user
   basic.full_name = user.full_name
   basic.phone = user.phone || ''
+  basic.email = user.email || ''
   basic.is_active = user.is_active
   password.value = ''
   error.value = ''
@@ -119,6 +122,10 @@ async function batchSetActive(isActive: boolean) {
 
 async function saveBasic() {
   if (!auth.state.token || !selected.value) return
+  if (basic.phone && !phoneValid.value) {
+    error.value = t('invalidInternationalPhone')
+    return
+  }
   saving.value = true
   error.value = ''
   notice.value = ''
@@ -126,8 +133,10 @@ async function saveBasic() {
     const result = await authApi.updateManagedUser(auth.state.token, selected.value.id, { ...basic })
     replaceUser(result)
     notice.value = t('userSaved')
-  } catch {
-    error.value = t('updateFailed')
+  } catch (exception) {
+    error.value = exception instanceof ApiError && exception.code === 'email_already_in_use'
+      ? t('emailAlreadyInUse')
+      : t('updateFailed')
   } finally {
     saving.value = false
   }
@@ -216,10 +225,12 @@ watch(() => props.role, () => {
             <div><dt class="text-slate-500">{{ t('schoolChineseName') }}</dt><dd class="mt-1 font-medium text-slate-900">{{ selected.institution_name_zh || selected.institution_abbr }}</dd></div>
             <div><dt class="text-slate-500">{{ t('collegeChineseName') }}</dt><dd class="mt-1 font-medium text-slate-900">{{ selected.college_name_zh || '—' }}</dd></div>
             <div><dt class="text-slate-500">{{ t('profileStatus') }}</dt><dd class="mt-1 font-medium text-slate-900">{{ selected.profile_completed ? t('complete') : t('incomplete') }}</dd></div>
+            <div><dt class="text-slate-500">{{ t('email') }}</dt><dd class="mt-1 break-all font-medium text-slate-900">{{ selected.email || '—' }}</dd></div>
           </dl>
           <form class="mt-6 space-y-4 border-t border-slate-100 pt-6" @submit.prevent="saveBasic">
             <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('fullName') }}<Input v-model="basic.full_name" required /></label>
-            <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('contactPhone') }}<Input v-model="basic.phone" type="tel" /></label>
+            <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('contactPhone') }}<InternationalPhoneInput v-model="basic.phone" @valid="phoneValid = $event" /></label>
+            <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('email') }}<Input v-model="basic.email" type="email" autocomplete="email" maxlength="320" /></label>
             <label class="flex items-center gap-2 text-sm font-medium text-slate-700"><input v-model="basic.is_active" type="checkbox" class="h-4 w-4 rounded border-slate-300" />{{ basic.is_active ? t('active') : t('disabled') }}</label>
             <Button type="submit" :disabled="saving">{{ saving ? t('loading') : t('save') }}</Button>
           </form>

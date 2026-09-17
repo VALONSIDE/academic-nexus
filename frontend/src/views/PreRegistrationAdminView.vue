@@ -118,7 +118,6 @@ onMounted(loadAccounts)
     <div class="max-w-5xl">
       <h1 class="text-3xl font-semibold tracking-tight text-slate-900">{{ t('templateTitle') }}</h1>
       <p class="mt-3 leading-7 text-slate-600">{{ t('templateDescription') }}</p>
-      <p class="mt-2 text-sm font-medium text-sky-700">{{ t('roleSeparationDescription') }}</p>
 
       <Card class="mt-8 p-6">
         <div class="flex items-start gap-4">

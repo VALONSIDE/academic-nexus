@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 AiTopic = Literal["academic_planning", "mentor_consultation", "learning_roadmap", "selection_advisor"]
@@ -13,13 +13,9 @@ AiResponseMode = Literal["standard", "stream"]
 
 
 class AiConversationCreateRequest(BaseModel):
-    topic: AiTopic
-    title: str | None = Field(default=None, max_length=160)
+    model_config = ConfigDict(extra="forbid")
 
-    @field_validator("title")
-    @classmethod
-    def normalize_title(cls, title: str | None) -> str | None:
-        return title.strip() or None if title is not None else None
+    topic: AiTopic
 
 
 class AiConversationRenameRequest(BaseModel):

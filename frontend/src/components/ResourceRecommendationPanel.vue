@@ -16,7 +16,8 @@ const error = ref('')
 onMounted(async () => {
   if (!auth.state.token) return
   try {
-    resources.value = (await authApi.recommendedResources(auth.state.token, 3)).items
+    const result = await authApi.recommendedResources(auth.state.token, 3)
+    resources.value = result.items
   } catch {
     resources.value = []
   }

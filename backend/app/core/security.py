@@ -19,7 +19,8 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, password_hash: str | None) -> bool:
     # Verify a dummy hash for unknown accounts to reduce account-enumeration timing leaks.
-    return password_hasher.verify(password, password_hash or _DUMMY_PASSWORD_HASH)
+    verified = password_hasher.verify(password, password_hash or _DUMMY_PASSWORD_HASH)
+    return bool(password_hash) and verified
 
 
 def create_access_token(*, subject: str, roles: list[str], auth_version: int = 0, scope: str = "authenticated") -> str:
@@ -41,6 +42,11 @@ def create_access_token(*, subject: str, roles: list[str], auth_version: int = 0
 
 def decode_access_token(token: str) -> dict[str, Any] | None:
     try:
-        return jwt.decode(token, get_settings().jwt_secret_key, algorithms=[ALGORITHM])
+        return jwt.decode(
+            token,
+            get_settings().jwt_secret_key,
+            algorithms=[ALGORITHM],
+            options={"require": ["sub", "exp", "iat", "auth_version", "scope"]},
+        )
     except InvalidTokenError:
         return None

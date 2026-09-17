@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession
@@ -12,6 +12,8 @@ from app.schemas.auth import (
     ActivationRequest,
     ActivationStartResponse,
     AuthResponse,
+    ContactUpdateRequest,
+    ContactPhoneUpdateRequest,
     LocaleUpdateRequest,
     LoginRequest,
     PasswordChangeRequest,
@@ -34,10 +36,22 @@ def serialize_user(user: User) -> UserResponse:
         id=user.id,
         username=user.username or "",
         full_name=user.full_name,
+        phone=user.phone,
+        email=user.email,
         preferred_locale=user.preferred_locale,
         is_active=user.is_active,
         roles=sorted(role.code for role in user.roles),
     )
+
+
+def ensure_email_available(db: DbSession, user: User, email: str | None) -> None:
+    if email is None:
+        return
+    duplicate = db.scalar(
+        select(User.id).where(User.tenant_id == user.tenant_id, func.lower(User.email) == email.lower(), User.id != user.id)
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "email_already_in_use"})
 
 
 def authenticate_response(user: User) -> AuthResponse:
@@ -73,12 +87,13 @@ def start_activation(payload: ActivationRequest, db: DbSession) -> ActivationSta
         .where(PreRegistration.username == payload.username)
         .with_for_update()
     )
+    key_verified = verify_password(payload.access_key, pre_registration.access_key_hash if pre_registration else None)
     if (
         pre_registration is None
         or pre_registration.status != "issued"
         or pre_registration.full_name != payload.full_name.strip()
         or pre_registration.academic_id != payload.academic_id
-        or not verify_password(payload.access_key, pre_registration.access_key_hash)
+        or not key_verified
     ):
         raise invalid_activation
 
@@ -119,6 +134,7 @@ def start_activation(payload: ActivationRequest, db: DbSession) -> ActivationSta
     else:
         # Restarting the incomplete process requires all receipt fields and the key again.
         user.password_hash = hash_password(payload.password)
+        user.auth_version += 1
         user.preferred_locale = payload.preferred_locale
         user.terms_accepted_at = datetime.now(timezone.utc)
         user.privacy_accepted_at = datetime.now(timezone.utc)
@@ -181,7 +197,8 @@ def login(payload: LoginRequest, db: DbSession) -> AuthResponse:
         .order_by(User.created_at)
     )
     # Do not reveal whether an account exists, is incomplete, disabled, or has a wrong password.
-    if user is None or not user.is_active or not profile_is_complete(user) or not verify_password(payload.password, user.password_hash):
+    password_verified = verify_password(payload.password, user.password_hash if user else None)
+    if user is None or not user.is_active or not profile_is_complete(user) or not password_verified:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password / 用户名或密码错误",
@@ -199,6 +216,34 @@ def read_me(current_user: CurrentUser) -> UserResponse:
 @router.patch("/me/locale", response_model=UserResponse, summary="Update language preference / 更新语言偏好")
 def update_locale(payload: LocaleUpdateRequest, current_user: CurrentUser, db: DbSession) -> UserResponse:
     current_user.preferred_locale = payload.preferred_locale
+    db.commit()
+    db.refresh(current_user)
+    return serialize_user(current_user)
+
+
+@router.patch("/me/contact-phone", response_model=UserResponse, summary="Update own contact phone / 更新本人联系电话")
+def update_contact_phone(
+    payload: ContactPhoneUpdateRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> UserResponse:
+    current_user.phone = payload.phone
+    db.commit()
+    db.refresh(current_user)
+    return serialize_user(current_user)
+
+
+@router.patch("/me/contact", response_model=UserResponse, summary="Update own contact details / 更新本人联系方式")
+def update_contact(
+    payload: ContactUpdateRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> UserResponse:
+    if "email" in payload.model_fields_set:
+        ensure_email_available(db, current_user, payload.email)
+        current_user.email = payload.email
+    if "phone" in payload.model_fields_set:
+        current_user.phone = payload.phone
     db.commit()
     db.refresh(current_user)
     return serialize_user(current_user)

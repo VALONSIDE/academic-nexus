@@ -5,11 +5,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.models.ai import AiConversation, AiMessage
+from app.models.resource import Resource
 from app.models.user import User
+from app.services import resources as resource_service
 from app.services.matching import mentor_recommendations, student_candidates
 from app.services.ai.minimax import MiniMaxConfigurationError, MiniMaxRequestError, request_completion, stream_completion
 from app.services.ai.quota import complete_ai_call, release_ai_call, reserve_ai_call
@@ -71,7 +73,7 @@ TOPIC_GUIDANCE = {
 }
 
 
-def create_conversation(db: Session, user: User, *, topic: str, title: str | None = None) -> AiConversation:
+def create_conversation(db: Session, user: User, *, topic: str) -> AiConversation:
     # Serialize creation per account.  A server-side cap prevents a user from
     # bypassing the UI's history handling by opening multiple tabs or calling the
     # API directly.
@@ -80,7 +82,7 @@ def create_conversation(db: Session, user: User, *, topic: str, title: str | Non
         tenant_id=user.tenant_id,
         user_id=user.id,
         topic=topic,
-        title=title or DEFAULT_CONVERSATION_TITLE,
+        title=DEFAULT_CONVERSATION_TITLE,
         created_at=datetime.now(timezone.utc),
     )
     db.add(conversation)
@@ -125,13 +127,62 @@ def list_messages(db: Session, conversation: AiConversation) -> list[AiMessage]:
 
 
 def _profile_context(user: User) -> str:
+    contact_values = [part for part in (f"Email: {user.email}" if user.email else "", f"Phone: {user.phone}" if user.phone else "") if part]
+    contact = (
+        "\nPrivate contact information (use only when the user explicitly asks to draft or verify their own contact details; never volunteer it): "
+        + "; ".join(contact_values)
+        if contact_values
+        else ""
+    )
     if user.student_profile is not None:
         profile = user.student_profile
-        return f"Role: student\nInstitution: {profile.university or ''}\nCollege: {profile.department or ''}\nResearch interests: {', '.join(profile.research_interests or [])}\nSkills: {', '.join(profile.skills or [])}\nAcademic goals: {profile.academic_goals or ''}\nResearch experience: {profile.research_experience or ''}"
+        return f"Role: student\nInstitution: {profile.university or ''}\nCollege: {profile.department or ''}\nResearch interests: {', '.join(profile.research_interests or [])}\nSkills: {', '.join(profile.skills or [])}\nAcademic goals: {profile.academic_goals or ''}\nResearch experience: {profile.research_experience or ''}{contact}"
     if user.mentor_profile is not None:
         profile = user.mentor_profile
-        return f"Role: mentor\nInstitution: {profile.university or ''}\nCollege: {profile.department or ''}\nResearch directions: {', '.join(profile.research_directions or [])}\nRepresentative papers: {', '.join(profile.representative_papers or [])}\nProjects: {profile.research_projects or ''}\nMentoring style: {profile.mentoring_style or ''}"
-    return "Role: platform user"
+        return f"Role: mentor\nInstitution: {profile.university or ''}\nCollege: {profile.department or ''}\nResearch directions: {', '.join(profile.research_directions or [])}\nRepresentative papers: {', '.join(profile.representative_papers or [])}\nProjects: {profile.research_projects or ''}\nMentoring style: {profile.mentoring_style or ''}{contact}"
+    return f"Role: platform user{contact}"
+
+
+def _resource_catalog_context(db: Session, user: User) -> str:
+    """Expose a bounded catalog of resources the current tenant user may already browse.
+
+    File bodies and non-public drafts intentionally stay out of the AI prompt.  The
+    assistant can recommend catalog entries but must not claim to have read an
+    uploaded attachment beyond its published metadata.
+    """
+    resources = list(
+        db.scalars(
+            select(Resource)
+            .options(selectinload(Resource.course), selectinload(Resource.paper), selectinload(Resource.book))
+            .where(Resource.tenant_id == user.tenant_id, Resource.is_published.is_(True))
+            .order_by(Resource.created_at.desc())
+            .limit(24)
+        ).all()
+    )
+    if user.student_profile is not None:
+        ranked = [(resource, resource_service.recommendation_score(user.student_profile, resource)) for resource in resources]
+        resources = [resource for resource, _ in sorted(ranked, key=lambda item: (-item[1], item[0].title.casefold()))]
+    entries = []
+    for resource in resources[:12]:
+        details = resource_service.metadata(resource)
+        metadata = ", ".join(f"{key}: {value}" for key, value in details.items() if value not in (None, ""))
+        entries.append(
+            " | ".join(
+                filter(
+                    None,
+                    [
+                        f"{resource.resource_type}: {resource.title}",
+                        f"Description: {resource.description[:240]}" if resource.description else "",
+                        f"Directions: {', '.join(resource.topics or [])}",
+                        f"Tags: {', '.join(resource.tags or [])}",
+                        metadata,
+                        f"Attachment: {resource.file_original_name}" if resource.file_original_name else "",
+                        "External link available" if resource.external_url else "",
+                    ],
+                )
+            )
+        )
+    return "Visible published platform resources (metadata only; do not invent file contents):\n" + ("\n".join(entries) if entries else "No published resources are available yet.")
 
 
 def _selection_advisor_context(db: Session, user: User) -> str:
@@ -185,19 +236,20 @@ def _system_prompt(db: Session, user: User, conversation: AiConversation) -> str
     guidance = TOPIC_GUIDANCE[conversation.topic][locale]
     context = _profile_context(user)
     selection_context = _selection_advisor_context(db, user) if conversation.topic == "selection_advisor" else ""
+    resource_context = _resource_catalog_context(db, user)
     if locale == "zh-CN":
         return (
             "你是 AcademicNexus（智导未来）的学术发展助手。回答应清晰、审慎、可执行。"
             "不要编造论文、导师或项目事实；涉及录取、心理或医疗等高风险事项时，应建议咨询合格专业人员。\n"
             f"当前专题：{guidance}\n用户画像（仅用于个性化建议）：\n{context}\n"
-            f"{selection_context}\n"
+            f"{selection_context}\n{resource_context}\n"
             "画像信息不足时，先提出最少且必要的澄清问题。请使用中文回答。"
         )
     return (
         "You are AcademicNexus's academic-development assistant. Be clear, careful, and actionable. "
         "Do not invent facts about papers, mentors, or projects. For high-stakes admissions, mental-health, or medical matters, suggest qualified professional support.\n"
         f"Current focus: {guidance}\nUser portrait (only for personalized advice):\n{context}\n"
-        f"{selection_context}\n"
+        f"{selection_context}\n{resource_context}\n"
         "Ask the minimum useful clarification when the portrait is insufficient. Reply in English."
     )
 
@@ -207,12 +259,15 @@ def _bounded_messages(db: Session, conversation: AiConversation) -> list[dict[st
     newest = list(db.scalars(select(AiMessage).where(AiMessage.conversation_id == conversation.id).order_by(AiMessage.created_at.desc()).limit(settings.ai_context_message_limit)).all())
     remaining = settings.ai_context_character_limit
     payload: list[dict[str, object]] = []
-    for message in reversed(newest):
+    # Spend the budget on the latest turn first, then restore chronological order.
+    for message in newest:
+        if remaining <= 0:
+            break
         content = message.content[-remaining:] if len(message.content) > remaining else message.content
         remaining = max(0, remaining - len(content))
         if content:
             payload.append({"role": message.role, "content": [{"type": "text", "text": content}]})
-    return payload
+    return list(reversed(payload))
 
 
 def _begin_turn(
@@ -271,9 +326,10 @@ def _persist_reply(
     )
     db.add(assistant_message)
     conversation.last_message_at = datetime.now(timezone.utc)
+    db.flush()
+    complete_ai_call(db, event_id, input_tokens=input_tokens, output_tokens=output_tokens, commit=False)
     db.commit()
     db.refresh(assistant_message)
-    complete_ai_call(db, event_id, input_tokens=input_tokens, output_tokens=output_tokens)
     return assistant_message
 
 
@@ -328,6 +384,8 @@ def stream_message(
         profile=profile,
     )
     pieces: list[str] = []
+    completed = False
+    error_code = "stream_interrupted"
     try:
         for provider_event in stream_completion(
             system=_system_prompt(db, user, conversation),
@@ -346,10 +404,18 @@ def stream_message(
                     input_tokens=provider_event.input_tokens,
                     output_tokens=provider_event.output_tokens,
                 )
+                completed = True
                 yield AiStreamEvent(user_message=user_message, assistant_message=assistant_message)
+                return
+        error_code = "provider_request_failed"
+        raise AiAssistantError(error_code)
     except MiniMaxConfigurationError as error:
-        _revert_turn(db, conversation, user_message=user_message, event_id=event.id, original_title=original_title, original_last_message_at=original_last_message_at, error_code="provider_not_configured")
+        error_code = "provider_not_configured"
         raise AiAssistantError("provider_not_configured") from error
     except MiniMaxRequestError as error:
-        _revert_turn(db, conversation, user_message=user_message, event_id=event.id, original_title=original_title, original_last_message_at=original_last_message_at, error_code="provider_request_failed")
+        error_code = "provider_request_failed"
         raise AiAssistantError("provider_request_failed") from error
+    finally:
+        if not completed:
+            db.rollback()
+            _revert_turn(db, conversation, user_message=user_message, event_id=event.id, original_title=original_title, original_last_message_at=original_last_message_at, error_code=error_code)
