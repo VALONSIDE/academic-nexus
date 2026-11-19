@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/academicnexus.svg" alt="AcademicNexus 项目标志，打开的书与相连的节点" width="100%" />
+  <img src="docs/assets/academicnexus-header.png" alt="智导未来 · AcademicNexus，黑白线描的学院钟楼与枫叶" width="100%" />
 </p>
 
 <h1 align="center">智导未来 · AcademicNexus</h1>
