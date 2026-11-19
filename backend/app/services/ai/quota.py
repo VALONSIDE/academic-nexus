@@ -166,6 +166,7 @@ def reserve_ai_call(
     *,
     model: str | None = None,
     credit_cost: int = 1,
+    commit: bool = True,
 ) -> AiUsageEvent:
     """Reserve the selected model's credit cost before reaching the provider.
 
@@ -200,7 +201,10 @@ def reserve_ai_call(
         status="reserved",
     )
     db.add(event)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(event)
     return event
 

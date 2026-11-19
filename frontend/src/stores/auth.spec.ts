@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { ApiError, authApi } from '@/api/client'
-import type { User } from '@/types/auth'
+import type { User, UserSubscription } from '@/types/auth'
 import { useAuthStore } from './auth'
 
 const user = { id: 'user-1', preferred_locale: 'zh-CN', roles: ['student'] } as User
@@ -36,4 +36,20 @@ it('does not restore a user after logout while refresh is in flight', async () =
   await pending
   expect(store.state.user).toBeNull()
   expect(localStorage.getItem('academicnexus.user')).toBeNull()
+})
+
+it('keeps the confirmed subscription plan while the next page fetches it', async () => {
+  expect(store.subscriptionPlan.value).toBeNull()
+  const getSubscription = vi.spyOn(authApi, 'subscription').mockResolvedValue({ plan_code: 'pro' } as UserSubscription)
+  await store.refreshSubscriptionPlan()
+  let resolve!: (value: UserSubscription) => void
+  getSubscription.mockReturnValue(new Promise(done => { resolve = done }))
+  const pending = useAuthStore().refreshSubscriptionPlan()
+  expect(useAuthStore().subscriptionPlan.value).toBe('pro')
+  store.setSubscriptionPlan('token', 'ultra')
+  resolve({ plan_code: 'pro' } as UserSubscription)
+  await pending
+  expect(store.subscriptionPlan.value).toBe('ultra')
+  store.logout()
+  expect(store.subscriptionPlan.value).toBeNull()
 })

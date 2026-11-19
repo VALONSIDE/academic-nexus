@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AcademicNexus / 智导未来 — Debian Alpha lifecycle manager
+# AcademicNexus / 智导未来 — Debian lifecycle manager
 # Usage: ./scripts/manage.sh {install|init|start|stop|restart|status|logs|destroy}
 
 set -Eeuo pipefail
@@ -192,7 +192,7 @@ write_environment() {
 COMPOSE_PROJECT_NAME=$DEFAULT_PROJECT_NAME
 APP_ENV=production
 APP_NAME=AcademicNexus
-APP_VERSION=alpha-0917-NR
+APP_VERSION="Beta V1.0"
 API_DOCS_ENABLED=false
 WEB_PORT=$web_port
 API_PORT=8000
@@ -209,7 +209,7 @@ INITIAL_ADMIN_EMAIL=$admin_email
 INITIAL_ADMIN_PASSWORD=$admin_password
 INITIAL_ADMIN_USERNAME=$admin_username
 DEFAULT_TENANT_SLUG=academicnexus-alpha
-DEFAULT_TENANT_NAME=AcademicNexus Alpha
+DEFAULT_TENANT_NAME=AcademicNexus
 
 CORS_ORIGINS=http://localhost:$web_port,http://127.0.0.1:$web_port,http://localhost:5173,http://127.0.0.1:5173
 MINIMAX_API_KEY=$minimax_key
@@ -260,11 +260,11 @@ initialize_project() {
 
   if [[ -f "$ENV_FILE" ]]; then
     warn "An existing .env file was found. Re-initializing replaces its secrets and invalidates existing sessions."
-    confirm "Replace it and recreate the Alpha environment?" || { info "Initialization cancelled."; return; }
+    confirm "Replace it and recreate the environment?" || { info "Initialization cancelled."; return; }
   fi
 
   local web_port admin_username admin_email admin_password admin_password_confirm minimax_key
-  read -r -p "Alpha public HTTP port [8080]: " web_port
+  read -r -p "Public HTTP port [8080]: " web_port
   web_port="${web_port:-8080}"
   valid_port "$web_port" || die "Please enter a port number between 1024 and 65535."
 
@@ -289,7 +289,7 @@ initialize_project() {
 
   write_environment "$web_port" "$admin_username" "$admin_email" "$admin_password" "$minimax_key"
   success "Private environment configuration was generated at .env (mode 600)."
-  info "Building and starting AcademicNexus Alpha..."
+  info "Building and starting AcademicNexus..."
   compose up -d --build
   wait_for_api 8000
   success "AcademicNexus is available at http://<server-ip>:$web_port"
@@ -332,7 +332,7 @@ destroy_project() {
   warn "This removes AcademicNexus containers, named volumes, generated .env secrets and uploaded resources."
   warn "Source code, Git history, Docker itself and unrelated Docker resources are preserved."
   local confirmation
-  read -r -p "Type DESTROY to permanently erase this Alpha runtime: " confirmation
+  read -r -p "Type DESTROY to permanently erase this runtime: " confirmation
   [[ "$confirmation" == "DESTROY" ]] || { info "Destroy cancelled."; return; }
 
   compose down --volumes --remove-orphans --rmi local || warn "Compose cleanup completed with warnings."
@@ -349,7 +349,7 @@ destroy_project() {
       rm -f -- "$ENV_FILE"
     fi
   fi
-  success "The AcademicNexus Alpha runtime and data have been destroyed."
+  success "The AcademicNexus runtime and data have been destroyed."
 }
 
 usage() {
@@ -358,7 +358,7 @@ AcademicNexus / 智导未来 lifecycle manager
 
 Usage:
   ./scripts/manage.sh install   Install Docker Engine and Docker Compose on Debian.
-  ./scripts/manage.sh init      Securely configure and launch a new Alpha environment.
+  ./scripts/manage.sh init      Securely configure and launch a new environment.
   ./scripts/manage.sh start     Build (if necessary) and start the project.
   ./scripts/manage.sh stop      Stop containers while retaining data.
   ./scripts/manage.sh restart   Restart the project.

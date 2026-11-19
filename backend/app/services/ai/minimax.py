@@ -38,25 +38,28 @@ def _client() -> Anthropic:
     return Anthropic(api_key=settings.minimax_api_key, base_url=settings.minimax_base_url, timeout=120.0, max_retries=0)
 
 
-def request_completion(*, system: str, messages: list[dict[str, object]], model: str) -> MiniMaxReply:
+def request_completion(*, system: str, messages: list[dict[str, object]], model: str, effort: str = "medium") -> MiniMaxReply:
     settings = get_settings()
     client = _client()
     try:
         response = client.messages.create(
             model=model,
-            max_tokens=settings.ai_max_output_tokens,
+            max_tokens=max(settings.ai_max_output_tokens, 8192) if model == "MiniMax-M3.1-Flash" or effort == "high" else settings.ai_max_output_tokens,
             temperature=0.7,
             system=system,
             messages=messages,
-            thinking={"type": "disabled"},
+            extra_body=({"output_config": {"effort": effort}} if model == "MiniMax-M3.1-Flash" else {"thinking": {"type": "adaptive" if effort == "high" else "disabled"}}),
         )
     except Exception as error:  # Provider exceptions are intentionally not leaked to API clients.
-        raise MiniMaxRequestError(type(error).__name__) from error
+        code = "provider_insufficient_balance" if getattr(error, "status_code", None) == 402 else type(error).__name__
+        raise MiniMaxRequestError(code) from error
     finally:
         client.close()
 
     text_blocks = [getattr(block, "text", "") for block in response.content if getattr(block, "type", "") == "text"]
     content = "\n".join(block for block in text_blocks if block).strip()
+    if getattr(response, "stop_reason", None) not in (None, "end_turn", "stop_sequence"):
+        raise MiniMaxRequestError("incomplete_provider_response")
     if not content:
         raise MiniMaxRequestError("empty_provider_response")
     usage = getattr(response, "usage", None)
@@ -67,7 +70,7 @@ def request_completion(*, system: str, messages: list[dict[str, object]], model:
     )
 
 
-def stream_completion(*, system: str, messages: list[dict[str, object]], model: str) -> Iterator[MiniMaxStreamEvent]:
+def stream_completion(*, system: str, messages: list[dict[str, object]], model: str, effort: str = "medium") -> Iterator[MiniMaxStreamEvent]:
     """Yield public text deltas only; provider reasoning is never exposed to the client."""
     settings = get_settings()
     client = None
@@ -76,11 +79,11 @@ def stream_completion(*, system: str, messages: list[dict[str, object]], model: 
         client = _client()
         stream = client.messages.create(
             model=model,
-            max_tokens=settings.ai_max_output_tokens,
+            max_tokens=max(settings.ai_max_output_tokens, 8192) if model == "MiniMax-M3.1-Flash" or effort == "high" else settings.ai_max_output_tokens,
             temperature=0.7,
             system=system,
             messages=messages,
-            thinking={"type": "disabled"},
+            extra_body=({"output_config": {"effort": effort}} if model == "MiniMax-M3.1-Flash" else {"thinking": {"type": "adaptive" if effort == "high" else "disabled"}}),
             stream=True,
         )
         has_text = False
@@ -93,6 +96,8 @@ def stream_completion(*, system: str, messages: list[dict[str, object]], model: 
                 usage = getattr(getattr(chunk, "message", None), "usage", None)
                 input_tokens = getattr(usage, "input_tokens", input_tokens)
             elif chunk_type == "message_delta":
+                if getattr(getattr(chunk, "delta", None), "stop_reason", None) == "max_tokens":
+                    raise MiniMaxRequestError("incomplete_provider_response")
                 usage = getattr(chunk, "usage", None)
                 output_tokens = getattr(usage, "output_tokens", output_tokens)
             elif chunk_type == "content_block_delta":
@@ -113,7 +118,8 @@ def stream_completion(*, system: str, messages: list[dict[str, object]], model: 
     except MiniMaxRequestError:
         raise
     except Exception as error:  # Provider exceptions are intentionally not leaked to API clients.
-        raise MiniMaxRequestError(type(error).__name__) from error
+        code = "provider_insufficient_balance" if getattr(error, "status_code", None) == 402 else type(error).__name__
+        raise MiniMaxRequestError(code) from error
     finally:
         try:
             if stream is not None:

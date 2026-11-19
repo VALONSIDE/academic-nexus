@@ -4,6 +4,7 @@ import { BookOpenCheck, BotMessageSquare, Building2, ChevronUp, CircleUserRound,
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
+import NotificationInbox from './NotificationInbox.vue'
 import LanguageSwitcher from './LanguageSwitcher.vue'
 import { authApi } from '@/api/client'
 import { Button } from '@/components/ui/button'
@@ -20,7 +21,6 @@ const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 const accountMenuOpen = ref(false)
-const subscriptionPlan = ref<'basic' | 'pro' | 'ultra' | 'max'>('basic')
 const institutionAdminName = ref('')
 
 const isSuperAdmin = computed(() => {
@@ -64,9 +64,9 @@ const navigation = computed<NavigationItem[]>(() => {
       items.splice(2, 0, { label: t('institutionManagement'), to: '/admin/institutions', icon: Building2 })
       items.push(
         { label: t('resourceQuotaManagement'), to: '/admin/resource-quotas', icon: HardDrive },
-        { label: t('selectionManagement'), to: '/admin/selection', icon: Settings2 },
       )
     }
+    items.push({ label: t('selectionManagement'), to: '/admin/selection', icon: Settings2 })
     return items
   }
   return [
@@ -83,8 +83,10 @@ const userInitial = computed(() => auth.state.user?.full_name?.trim().slice(0, 1
 const accountIdentityLabel = computed(() => {
   if (isSuperAdmin.value) return t('superAdministrator')
   if (isInstitutionAdmin.value) return institutionAdminName.value ? `${institutionAdminName.value} ${t('administratorSuffix')}` : t('institutionAdministrator')
-  if (subscriptionPlan.value === 'basic') return t('standardAccount')
-  return t({ pro: 'subscriptionPlanPro', ultra: 'subscriptionPlanUltra', max: 'subscriptionPlanMax' }[subscriptionPlan.value])
+  const plan = auth.subscriptionPlan.value
+  if (!plan) return ''
+  if (plan === 'basic') return t('standardAccount')
+  return t({ pro: 'subscriptionPlanPro', ultra: 'subscriptionPlanUltra', max: 'subscriptionPlanMax' }[plan])
 })
 
 async function loadAccountIdentity() {
@@ -94,14 +96,17 @@ async function loadAccountIdentity() {
       const scopes = await authApi.myInstitutionAdminScopes(auth.state.token)
       institutionAdminName.value = scopes[0]?.institution_name_zh || ''
     } else if (!isAdministrator.value) {
-      subscriptionPlan.value = (await authApi.subscription(auth.state.token)).plan_code
+      await auth.refreshSubscriptionPlan()
     }
   } catch {
     // Keep the safe fallback label if the optional metadata lookup fails.
   }
 }
 
-function signOut() {
+async function signOut() {
+  if (auth.state.token) {
+    try { await authApi.logout(auth.state.token) } catch { window.alert('退出失败，请重试 / Sign out failed. Please retry.'); return }
+  }
   auth.logout()
   router.push('/login')
 }
@@ -140,7 +145,7 @@ onMounted(loadAccountIdentity)
           </div>
           <button type="button" class="flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition hover:bg-slate-100" @click="accountMenuOpen = !accountMenuOpen">
             <span class="grid h-9 w-9 place-items-center rounded-full bg-slate-900 text-sm font-semibold text-white">{{ userInitial }}</span>
-            <span class="min-w-0 flex-1"><span class="block truncate text-sm font-medium text-slate-800">{{ auth.state.user?.full_name }}</span><span class="block truncate text-xs text-slate-500">{{ accountIdentityLabel }}</span></span>
+            <span class="min-w-0 flex-1"><span class="block truncate text-sm font-medium text-slate-800">{{ auth.state.user?.full_name }}</span><span class="block min-h-4 truncate text-xs text-slate-500">{{ accountIdentityLabel }}</span></span>
             <ChevronUp class="h-4 w-4 shrink-0 text-slate-500 transition" :class="accountMenuOpen ? '' : 'rotate-180'" />
           </button>
         </div>
@@ -150,6 +155,8 @@ onMounted(loadAccountIdentity)
         <header class="flex h-[4.5rem] shrink-0 items-center justify-end border-b border-slate-200 bg-white px-6 lg:px-10">
           <div class="flex items-center gap-2">
             <RouterLink to="/about" class="rounded-md px-2 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900">{{ t('about') }}</RouterLink>
+            <NotificationInbox mode="bell" :workspace="activeRole" />
+            <RouterLink v-if="isAdministrator && academicRole" :to="activeRole === 'admin' ? `/${academicRole}` : '/admin'" class="inline-flex h-8 items-center rounded-lg border border-slate-200 px-3 text-xs font-medium">{{ t(activeRole === 'admin' ? 'switchToAcademic' : 'switchToAdmin') }}</RouterLink>
             <LanguageSwitcher />
             <Button variant="outline" size="sm" type="button" @click="signOut"><LogOut class="mr-1.5 h-3.5 w-3.5" />{{ t('logout') }}</Button>
           </div>

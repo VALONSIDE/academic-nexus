@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, BotMessageSquare, Braces, Database, GraduationCap, Sparkles, UsersRound, WandSparkles } from 'lucide-vue-next'
+import { ArrowLeft, BotMessageSquare, Database, GraduationCap, Sparkles, UsersRound, WandSparkles } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
@@ -22,9 +22,9 @@ const capabilities = [
 ]
 
 const team = [
-  { name: '吴磊', role: 'aboutTeamLeadRole', initial: '吴' },
-  { name: '刘畅', role: 'aboutTeamDataRole', initial: '刘' },
-  { name: '徐前程', role: 'aboutTeamDeveloperRole', initial: '徐' },
+  { name: '尹如锦', role: 'aboutTeamLeadRole' },
+  { name: '杜胜兰', role: 'aboutTeamMemberRole' },
+  { name: '吴磊', role: 'aboutTeamMemberRole' },
 ]
 </script>
 
@@ -46,12 +46,16 @@ const team = [
 
         <aside class="flex flex-col rounded-2xl border border-slate-200 p-4 sm:p-5">
           <div class="flex items-center gap-2"><UsersRound class="h-5 w-5 text-sky-700" /><h2 class="font-semibold">{{ t('aboutProjectTeam') }}</h2></div>
-          <ul class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-1"><li v-for="member in team" :key="member.name" class="flex items-center gap-3 rounded-xl bg-slate-50 p-2.5"><span class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-900 text-xs font-semibold text-white">{{ member.initial }}</span><span class="min-w-0"><span class="block text-sm font-medium text-slate-900">{{ member.name }}</span><span class="mt-0.5 block text-xs leading-4 text-slate-500">{{ t(member.role) }}</span></span></li></ul>
-          <div class="mt-auto border-t border-slate-100 pt-4"><div class="flex items-center gap-2 text-sm font-semibold"><Braces class="h-4 w-4 text-sky-700" />{{ t('aboutTechnicalDevelopment') }}</div><p class="mt-1 text-sm text-slate-600">{{ t('aboutTechnicalDevelopmentValue') }}</p></div>
+          <ul class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+            <li v-for="member in team" :key="member.name" class="flex items-center gap-3 rounded-xl bg-slate-50 p-2.5">
+              <span aria-hidden="true" class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-900 text-xs font-semibold text-white">{{ member.name[0] }}</span>
+              <span class="min-w-0"><span class="block text-sm font-medium text-slate-900">{{ member.name }}</span><span class="mt-0.5 block text-xs leading-4 text-slate-500">{{ t(member.role) }}</span></span>
+            </li>
+          </ul>
         </aside>
       </div>
 
-      <footer class="flex flex-col gap-2 border-t border-slate-100 px-5 py-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-7"><span>{{ t('copyrightNotice') }}</span><span class="flex items-center gap-3"><RouterLink to="/legal" class="font-medium text-slate-600 hover:text-slate-900">{{ t('legalCompliance') }}</RouterLink><span>{{ APP_VERSION }}</span><span>{{ t('aboutCopyrightCompact') }}</span></span></footer>
+      <footer class="flex flex-col gap-2 border-t border-slate-100 px-5 py-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-7"><span>{{ t('copyrightNotice') }}</span><span class="flex items-center gap-3"><RouterLink to="/legal" class="font-medium text-slate-600 hover:text-slate-900">{{ t('legalCompliance') }}</RouterLink><span>{{ APP_VERSION }}</span><RouterLink to="/legal/content" class="font-medium text-slate-600 hover:text-slate-900">{{ t('sourceCodeAndCopyright') }}</RouterLink></span></footer>
     </section>
   </main>
 </template>

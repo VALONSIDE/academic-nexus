@@ -15,7 +15,8 @@ from app.api.v1.endpoints.profiles import (
 )
 from app.core.security import hash_password
 from app.models.user import MentorProfile, StudentProfile, User
-from app.services.admin_scope import can_manage_user, institution_admin_abbrs, is_super_admin
+from app.services.contacts import visible_contact
+from app.services.admin_scope import can_manage_user, institution_admin_abbrs, is_super_admin, is_administrator
 from app.schemas.profiles import (
     AdminUserBatchUpdateRequest,
     AdminUserBatchUpdateResponse,
@@ -37,12 +38,18 @@ def _managed_role(user: User) -> ManagedRole | None:
     return None
 
 
-def serialize_managed_user(user: User) -> ManagedUserResponse:
+def serialize_managed_user(user: User, viewer: User | None = None) -> ManagedUserResponse:
     role = _managed_role(user)
+    identity = serialize_user(user).model_dump()
+    if viewer is None or is_administrator(user):
+        identity.update(phone=None, email=None, wechat=None)
+    elif viewer.id != user.id and not is_super_admin(viewer):
+        visible = visible_contact(viewer, user)
+        identity.update({field: visible[field] for field in ("phone", "email", "wechat")})
     if role == "student" and user.student_profile is not None:
         profile = user.student_profile
         return ManagedUserResponse(
-            **serialize_user(user).model_dump(),
+            **identity,
             role=role,
             academic_id=profile.student_no,
             institution_abbr=profile.institution_abbr,
@@ -54,7 +61,7 @@ def serialize_managed_user(user: User) -> ManagedUserResponse:
     if role == "mentor" and user.mentor_profile is not None:
         profile = user.mentor_profile
         return ManagedUserResponse(
-            **serialize_user(user).model_dump(),
+            **identity,
             role=role,
             academic_id=profile.employee_no,
             institution_abbr=profile.institution_abbr,
@@ -103,7 +110,7 @@ def list_managed_users(
         pattern = f"%{normalized_search}%"
         statement = statement.where(or_(User.username.ilike(pattern), User.full_name.ilike(pattern)))
     users = db.scalars(statement).unique().all()
-    managed = [serialize_managed_user(user) for user in users if _managed_role(user) == role]
+    managed = [serialize_managed_user(user, admin) for user in users if _managed_role(user) == role]
     return ManagedUserListResponse(items=managed, total=len(managed))
 
 
@@ -116,11 +123,20 @@ def update_managed_user(
 ) -> ManagedUserResponse:
     user = _load_managed_user(db, admin, user_id)
     role = _managed_role(user)
+    fields = payload.model_fields_set & {"email", "phone", "wechat"}
+    if fields and (is_administrator(user) or not is_super_admin(admin)):
+        raise HTTPException(403, detail={"code": "managed_contact_forbidden"})
+    if "wechat" in fields:
+        if not payload.wechat:
+            raise HTTPException(422, detail={"code": "wechat_required"})
+        user.wechat = payload.wechat
     if payload.full_name is not None:
         user.full_name = payload.full_name
     if "phone" in payload.model_fields_set:
         user.phone = payload.phone
     if "email" in payload.model_fields_set:
+        if not payload.email:
+            raise HTTPException(422, detail="Email is required / 邮箱为必填")
         ensure_email_available(db, user, payload.email)
         user.email = payload.email
     if payload.preferred_locale is not None:
@@ -139,7 +155,7 @@ def update_managed_user(
         apply_mentor_profile(user.mentor_profile, payload.mentor_profile)
     db.commit()
     db.refresh(user)
-    return serialize_managed_user(user)
+    return serialize_managed_user(user, admin)
 
 
 @router.post("/batch-status", response_model=AdminUserBatchUpdateResponse, summary="Batch enable or disable users / 批量启用或停用用户")

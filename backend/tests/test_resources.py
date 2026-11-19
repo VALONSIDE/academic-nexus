@@ -6,7 +6,7 @@ from app.db.base import Base
 from app.models import resource, tenant, user  # noqa: F401
 from app.models.resource import Resource
 from app.models.tenant import Tenant
-from app.models.user import StudentProfile, User
+from app.models.user import StudentProfile, MentorProfile, User
 from app.services import resources as resource_service
 
 
@@ -24,6 +24,7 @@ def test_resource_quota_and_profile_recommendation() -> None:
         db.add(
             StudentProfile(
                 user_id=student.id,
+                institution_abbr="TEST",
                 research_interests=["natural language processing"],
                 skills=["Python"],
                 academic_performance="GPA 3.8",
@@ -31,6 +32,7 @@ def test_resource_quota_and_profile_recommendation() -> None:
                 research_experience="coursework",
             )
         )
+        db.add(MentorProfile(user_id=mentor.id, institution_abbr="TEST"))
         db.add_all(
             [
                 Resource(

@@ -49,6 +49,29 @@ def normalize_email(email: str | None) -> str | None:
         raise ValueError("Invalid email address / 邮箱格式不正确") from error
 
 
+def normalize_wechat(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    value = value.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{3,64}", value):
+        raise ValueError("Enter a WeChat ID using 3-64 letters, digits, underscores or hyphens / 微信号须为3-64位字母、数字、下划线或短横线")
+    return value
+
+
+def required_email(value: str) -> str:
+    result = normalize_email(value)
+    if not result:
+        raise ValueError("Email is required / 邮箱为必填")
+    return result
+
+
+def required_wechat(value: str) -> str:
+    result = normalize_wechat(value)
+    if not result:
+        raise ValueError("WeChat ID is required / 微信号为必填")
+    return result
+
+
 class ActivationRequest(BaseModel):
     """Activation is allowed only for imported partner-school identities / 仅允许激活合作院校导入的身份。"""
 
@@ -103,6 +126,12 @@ class LocaleUpdateRequest(BaseModel):
 
 
 class ContactUpdateRequest(BaseModel):
+    wechat: str | None = Field(default=None, max_length=64)
+    share_email: bool | None = None
+    share_phone: bool | None = None
+    share_wechat: bool | None = None
+
+    _validate_wechat = field_validator("wechat")(normalize_wechat)
     phone: str | None = Field(default=None, max_length=32)
     email: str | None = Field(default=None, max_length=320)
 
@@ -139,6 +168,10 @@ class UserResponse(BaseModel):
     full_name: str
     phone: str | None = None
     email: str | None = None
+    wechat: str | None = None
+    share_email: bool = False
+    share_phone: bool = False
+    share_wechat: bool = False
     preferred_locale: Locale
     is_active: bool
     roles: list[str]

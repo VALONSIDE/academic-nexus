@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
@@ -10,7 +10,10 @@ from app.api.deps import DbSession, require_super_admin
 from app.models.pre_registration import PreRegistration
 from app.models.user import User
 from app.schemas.pre_registration import PreRegistrationAdminResponse, PreRegistrationBulkDeleteRequest, PreRegistrationListResponse
+from app.core.security import hash_password
+from app.services.access_keys import generate_access_key, access_key_fingerprint
 from app.services.pre_registration_import import (
+    ReceiptRow,
     PreRegistrationImportError,
     build_import_template,
     build_receipt_workbook,
@@ -132,6 +135,7 @@ def import_workbook(
     receipt = build_receipt_workbook(receipt_rows, batch.id)
     return Response(
         content=receipt,
+        status_code=status.HTTP_201_CREATED,
         media_type=XLSX_MEDIA_TYPE,
         headers={
             "Content-Disposition": f'attachment; filename="academicnexus-account-receipt-{batch.id}.xlsx"',
@@ -140,3 +144,31 @@ def import_workbook(
             "Cache-Control": "no-store, private",
         },
     )
+
+
+@router.post("/reissue", summary="Reissue selected activation receipts / 重新签发所选账户回执")
+def reissue_receipts(payload: PreRegistrationBulkDeleteRequest, db: DbSession, admin: User = Depends(require_super_admin)) -> Response:
+    items = db.scalars(select(PreRegistration).where(PreRegistration.id.in_(payload.ids), PreRegistration.tenant_id == admin.tenant_id).order_by(PreRegistration.id).with_for_update()).all()
+    if len(items) != len(set(payload.ids)):
+        raise HTTPException(404, detail={"code": "pre_registration_not_found"})
+    if any(item.status != "issued" for item in items):
+        raise HTTPException(409, detail={"code": "only_issued_accounts_can_be_reissued"})
+    rows = []
+    for item in items:
+        key = generate_access_key()
+        item.access_key_hash = hash_password(key)
+        item.access_key_fingerprint = access_key_fingerprint(key)
+        pending = db.scalar(select(User).where(User.pre_registration_id == item.id).with_for_update())
+        if pending is not None:
+            pending.auth_version += 1
+        rows.append(ReceiptRow(item.username, item.full_name, item.academic_id, item.institution_name_zh, item.college_name_zh, key))
+    receipt = build_receipt_workbook(rows, uuid4())
+    db.commit()
+    return Response(receipt, media_type=XLSX_MEDIA_TYPE, headers={"Content-Disposition": 'attachment; filename="academicnexus-account-receipt-reissued.xlsx"', "Cache-Control": "no-store, private"})
+
+
+@router.get("/audit/events", summary="Security audit / 安全操作记录")
+def audit_events(db: DbSession, admin: User = Depends(require_super_admin), limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)) -> dict:
+    from app.models.security import SecurityAudit
+    items = db.scalars(select(SecurityAudit).where(SecurityAudit.tenant_id == admin.tenant_id).order_by(SecurityAudit.created_at.desc(), SecurityAudit.id).limit(limit).offset(offset)).all()
+    return {"items": [{"id": str(item.id), "actor_id": str(item.actor_id), "method": item.method, "path": item.path, "status": item.status, "created_at": item.created_at.isoformat()} for item in items]}

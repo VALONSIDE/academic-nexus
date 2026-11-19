@@ -10,6 +10,7 @@ import type {
   MentorAcademicProfile,
   StudentAcademicProfile,
   User,
+  UserSubscription,
 } from '@/types/auth'
 
 const tokenKey = 'academicnexus.access-token'
@@ -33,6 +34,11 @@ const state = reactive<{ token: string | null; user: User | null }>({
   token: window.localStorage.getItem(tokenKey),
   user: storedUser(),
 })
+
+const subscriptionIdentity = ref<{ token: string; plan: UserSubscription['plan_code'] } | null>(null)
+const subscriptionPlan = computed(() => subscriptionIdentity.value?.token === state.token
+  ? subscriptionIdentity.value?.plan ?? null : null)
+let subscriptionRequest = 0
 
 function storedRegistration(): RegistrationSession | null {
   try {
@@ -61,6 +67,24 @@ function persistUser(user: User) {
 export function useAuthStore() {
   const isAuthenticated = computed(() => Boolean(state.token && state.user))
 
+  async function refreshSubscriptionPlan() {
+    const token = state.token
+    if (!token) return
+    const request = ++subscriptionRequest
+    try {
+      const subscription = await authApi.subscription(token)
+      if (request === subscriptionRequest && state.token === token) {
+        subscriptionIdentity.value = { token, plan: subscription.plan_code }
+      }
+    } catch { /* Keep the last confirmed plan for this session. */ }
+  }
+
+  function setSubscriptionPlan(token: string, plan: UserSubscription['plan_code']) {
+    if (token !== state.token) return
+    subscriptionRequest++
+    subscriptionIdentity.value = { token, plan }
+  }
+
   async function login(payload: LoginPayload) {
     const result = await authApi.login(payload)
     persist(result)
@@ -77,7 +101,7 @@ export function useAuthStore() {
   async function completeRegistration(
     role: 'student' | 'mentor',
     payload: StudentAcademicProfile | MentorAcademicProfile,
-    contact: { phone: string; email: string },
+    contact: { phone: string; email: string; wechat?: string; share_email?: boolean; share_phone?: boolean; share_wechat?: boolean },
   ) {
     if (!registration.value || registration.value.role !== role) throw new Error('Registration session expired')
     const result = role === 'student'
@@ -110,7 +134,7 @@ export function useAuthStore() {
     window.localStorage.setItem(userKey, JSON.stringify(state.user))
   }
 
-  async function updateContact(contact: { phone: string; email: string }) {
+  async function updateContact(contact: { phone: string; email: string; wechat?: string; share_email?: boolean; share_phone?: boolean; share_wechat?: boolean }) {
     if (!state.token) throw new Error('Authentication required')
     const user = await authApi.updateContact(state.token, contact)
     persistUser(user)
@@ -125,6 +149,8 @@ export function useAuthStore() {
   }
 
   function logout() {
+    subscriptionRequest++
+    subscriptionIdentity.value = null
     state.token = null
     state.user = null
     window.localStorage.removeItem(tokenKey)
@@ -133,5 +159,6 @@ export function useAuthStore() {
     window.sessionStorage.removeItem(registrationKey)
   }
 
-  return { state, registration, isAuthenticated, login, startActivation, completeRegistration, refreshUser, setLocale, updateContact, changePassword, logout }
+  return { state, registration, isAuthenticated, subscriptionPlan, refreshSubscriptionPlan, setSubscriptionPlan,
+    login, startActivation, completeRegistration, refreshUser, setLocale, updateContact, changePassword, logout }
 }

@@ -57,3 +57,7 @@ class AdminResourceQuotaUpdateRequest(BaseModel):
     @classmethod
     def keep_valid_quota(cls, quota_mb: int) -> int:
         return quota_mb
+
+
+class AdminResourceQuotaBatchRequest(AdminResourceQuotaUpdateRequest):
+    user_ids: list[UUID] = Field(min_length=1, max_length=250)

@@ -15,6 +15,8 @@ from app.core.security import hash_password, verify_password
 from app.models.ai import AiUserQuota, AiUserSubscription
 from app.models.pre_registration import PreRegistration
 from app.models.subscription import InstitutionAdminScope, InstitutionSubscriptionAllocation, PremiumSubscriptionKey
+from app.services.workspace_events import record, notify_school_admins
+from app.models.tenant import Tenant
 from app.models.user import MentorProfile, Role, StudentProfile, User
 from app.services.admin_scope import can_manage_institution, institution_admin_abbrs, is_super_admin, user_institution_abbr
 from app.services.spreadsheet_safety import safe_spreadsheet_text
@@ -214,6 +216,7 @@ def set_institution_allocation(
     if not is_super_admin(admin):
         raise SubscriptionError("super_admin_required")
     institution = _institution_option(db, admin, institution_abbr)
+    db.scalar(select(Tenant.id).where(Tenant.id == admin.tenant_id).with_for_update())
     allocation = _allocation(db, admin.tenant_id, institution.institution_abbr, lock=True)
     if allocation is None:
         allocation = InstitutionSubscriptionAllocation(
@@ -223,9 +226,16 @@ def set_institution_allocation(
         )
         db.add(allocation)
     allocation.institution_name_zh = institution.institution_name_zh
-    allocation.pro_credits = pro_credits
-    allocation.ultra_credits = ultra_credits
-    allocation.max_credits = max_credits
+    for plan, value in (("pro", pro_credits), ("ultra", ultra_credits), ("max", max_credits)):
+        field = _allocation_field(plan)
+        previous = getattr(allocation, field) or 0
+        setattr(allocation, field, value)
+        if previous != value:
+            details = {"plan": plan, "previous": previous, "available": value}
+            record(db, admin.tenant_id, "subscription_allocation", actor_id=admin.id,
+                   institution=institution_abbr, **details)
+            notify_school_admins(db, admin.tenant_id, institution_abbr, "subscription_allocation",
+                                 actor_id=admin.id, **details)
     db.commit()
     db.refresh(allocation)
     return allocation
@@ -312,7 +322,7 @@ def assign_institution_admin(
         select(User).options(selectinload(User.roles), selectinload(User.student_profile), selectinload(User.mentor_profile)).where(
             User.tenant_id == super_admin.tenant_id,
             User.id == user_id,
-        )
+        ).with_for_update()
     )
     if (
         target is None
@@ -346,6 +356,8 @@ def assign_institution_admin(
             assigned_by_user_id=super_admin.id,
         )
         db.add(scope)
+        record(db, target.tenant_id, "institution_admin_assigned", actor_id=super_admin.id,
+               recipient_id=target.id, workspace="admin", institution=institution.institution_abbr)
     else:
         scope.institution_name_zh = institution.institution_name_zh
     db.commit()
@@ -397,6 +409,9 @@ def revoke_institution_admin(db: Session, super_admin: User, scope_id) -> None:
     )
     if target is not None and has_remaining_scope is None:
         target.roles[:] = [role for role in target.roles if role.code != "institution_admin"]
+        workspace = "mentor" if target.mentor_profile is not None else "student"
+        record(db, target.tenant_id, "institution_admin_revoked", actor_id=super_admin.id,
+               recipient_id=target.id, workspace=workspace, institution=scope.institution_abbr)
     db.commit()
 
 
@@ -449,6 +464,8 @@ def issue_subscription_keys(
             db.rollback()
             raise SubscriptionError("subscription_key_generation_failed")
     setattr(allocation, field, available - quantity)
+    notify_school_admins(db, admin.tenant_id, institution_abbr, "subscription_issued",
+                         actor_id=admin.id, plan=plan_code, quantity=quantity)
     db.commit()
     for item in issued:
         db.refresh(item.key)
@@ -524,6 +541,10 @@ def revoke_subscription_key(db: Session, admin: User, key_id) -> PremiumSubscrip
     setattr(allocation, _allocation_field(key.plan_code), getattr(allocation, _allocation_field(key.plan_code)) + 1)
     key.status = "revoked"
     key.revoked_at = utc_now()
+    record(db, admin.tenant_id, "subscription_reclaimed", actor_id=admin.id,
+           institution=key.institution_abbr, subject_id=key.id, plan=key.plan_code, quantity=1)
+    notify_school_admins(db, admin.tenant_id, key.institution_abbr, "subscription_reclaimed",
+                         actor_id=admin.id, plan=key.plan_code, quantity=1)
     db.commit()
     db.refresh(key)
     return key
@@ -571,6 +592,9 @@ def _activate_locked_subscription_key(
     key.status = "activated"
     key.activated_by_user_id = user.id
     key.activated_at = started_at
+    workspace = "mentor" if user.mentor_profile is not None else "student"
+    record(db, user.tenant_id, "subscription_activated", recipient_id=user.id,
+           workspace=workspace, institution=key.institution_abbr, subject_id=key.id, plan=key.plan_code)
     return SubscriptionSnapshot(
         plan_code=subscription.plan_code,
         credit_limit=subscription.credit_limit,

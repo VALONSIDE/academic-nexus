@@ -155,7 +155,7 @@ def test_managed_user_response_contains_contact_once(account_db, role_code, prof
     db.add(profile_type(user_id=user.id))
     db.commit()
     result = serialize_managed_user(user)
-    assert result.phone == user.phone
+    assert result.phone is None  # hidden contacts are not exposed by management serialization
     assert result.role == role_code
 
 
@@ -213,12 +213,12 @@ def test_resource_response_failure_does_not_delete_committed_file(account_db, tm
     db, mentor = account_db
     monkeypatch.setattr(get_settings(), "resource_storage_path", str(tmp_path))
     monkeypatch.setattr(resources, "_serialize", Mock(side_effect=RuntimeError("response failed")))
-    upload = UploadFile(filename="paper.pdf", file=BytesIO(b"test attachment"))
+    upload = UploadFile(filename="paper.pdf", file=BytesIO(b"%PDF-1.4 test attachment"))
     with pytest.raises(RuntimeError, match="response failed"):
         asyncio.run(resources.create_resource(resource_type="paper", title="Test paper", db=db, mentor=mentor, file=upload))
     resource = db.scalar(select(Resource))
     assert resource is not None
-    assert service.file_path(resource).read_bytes() == b"test attachment"
+    assert service.file_path(resource).read_bytes() == b"%PDF-1.4 test attachment"
     assert upload.file.closed
 
 
@@ -230,14 +230,14 @@ def test_failed_resource_deletion_keeps_the_file(account_db, tmp_path, monkeypat
     db, mentor = account_db
     monkeypatch.setattr(get_settings(), "resource_storage_path", str(tmp_path))
     result = asyncio.run(resources.create_resource(resource_type="paper", title="Test paper", db=db, mentor=mentor,
-                         file=UploadFile(filename="paper.pdf", file=BytesIO(b"keep me"))))
+                         file=UploadFile(filename="paper.pdf", file=BytesIO(b"%PDF-1.4 keep me"))))
     resource = db.get(Resource, result.id)
     path = service.file_path(resource)
     monkeypatch.setattr(db, "commit", Mock(side_effect=RuntimeError("commit failed")))
     with pytest.raises(RuntimeError, match="commit failed"):
         resources.delete_resource(resource.id, db, mentor)
     db.rollback()
-    assert path.read_bytes() == b"keep me"
+    assert path.read_bytes() == b"%PDF-1.4 keep me"
     assert db.get(Resource, result.id) is not None
 
 

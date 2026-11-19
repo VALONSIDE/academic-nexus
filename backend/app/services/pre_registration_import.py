@@ -174,7 +174,7 @@ def build_import_template() -> bytes:
     examples = workbook.create_sheet("填写示例 Examples")
     examples.append(list(TEMPLATE_HEADERS) + ["生成账户名称 (Generated Username)"])
     examples.append(["CUC", "中国传媒大学", "新闻学院", "学生", "张同学", "20240001", "CUC_S20240001"])
-    examples.append(["CUC", "中国传媒大学", "新闻学院", "导师", "李老师", "T10086", "CUC_TT10086"])
+    examples.append(["CUC", "中国传媒大学", "新闻学院", "导师", "李老师", "10086", "CUC_T10086"])
     _style_header(list(examples[1])); examples.freeze_panes = "A2"
     for column, width in zip("ABCDEFG", (18, 30, 30, 18, 22, 22, 30), strict=True): examples.column_dimensions[column].width = width
     examples.column_dimensions["F"].number_format = "@"

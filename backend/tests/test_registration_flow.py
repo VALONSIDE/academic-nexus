@@ -68,6 +68,7 @@ def test_account_cannot_log_in_until_academic_portrait_is_completed() -> None:
             StudentRegistrationCompleteRequest(
                 phone="+86 138 0013 8000",
                 email="Student@Example.edu",
+                wechat="student_test",
                 research_interests=["人工智能"],
                 skills=["Python"],
                 academic_performance="GPA 3.8/4.0",

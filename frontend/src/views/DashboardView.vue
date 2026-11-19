@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, type Component } from 'vue'
-import { ArrowUpRight, BellRing, BookOpenCheck, BotMessageSquare, ChartNoAxesCombined, CheckCircle2, ChevronRight, Clock3, Database, GraduationCap, HardDrive, Sparkles, UsersRound, WandSparkles } from 'lucide-vue-next'
+import NotificationInbox from '@/components/NotificationInbox.vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
+import { ArrowUpRight, BookOpenCheck, BotMessageSquare, ChartNoAxesCombined, CheckCircle2, Database, GraduationCap, HardDrive, Sparkles, UsersRound, WandSparkles } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
@@ -15,10 +16,7 @@ const { t } = useI18n()
 const auth = useAuthStore()
 const route = useRoute()
 const activeRole = computed<Role>(() => {
-  const roles = auth.state.user?.roles || []
-  const routeRole = route.path.split('/')[1]
-  if ((routeRole === 'student' || routeRole === 'mentor') && roles.includes(routeRole)) return routeRole
-  return roles.some(role => ['admin', 'super_admin', 'institution_admin'].includes(role)) ? 'admin' : roles.includes('mentor') ? 'mentor' : 'student'
+  return route.meta.role === 'mentor' ? 'mentor' : route.meta.role === 'admin' ? 'admin' : 'student'
 })
 const data = ref<DashboardOverview | null>(null)
 const loading = ref(false)
@@ -66,20 +64,12 @@ function width(item: DashboardBreakdown) {
   return `${Math.max(item.value ? 8 : 0, item.value / selectionMax.value * 100)}%`
 }
 
-function activityText(item: DashboardOverview['recent_selection_activity'][number]) {
-  return `${item.student_name} · ${item.mentor_name}`
-}
-
-function activityStatus(status: string) {
-  return t(selectionLabels[status] || status)
-}
-
 async function load() {
   if (!auth.state.token) return
   loading.value = true
   error.value = ''
   try {
-    data.value = await authApi.dashboard(auth.state.token)
+    data.value = await authApi.dashboard(auth.state.token, activeRole.value)
   } catch {
     error.value = t('updateFailed')
   } finally {
@@ -87,6 +77,7 @@ async function load() {
   }
 }
 
+watch(activeRole, load)
 onMounted(load)
 </script>
 
@@ -108,7 +99,7 @@ onMounted(load)
         <section class="mt-6 grid gap-5 xl:grid-cols-[1.08fr_0.92fr]">
           <Card class="rounded-2xl p-6 shadow-sm"><div class="flex items-center justify-between gap-3"><div><div class="flex items-center gap-2"><span class="grid h-8 w-8 place-items-center rounded-lg bg-sky-50 text-sky-700"><CheckCircle2 class="h-4 w-4" /></span><h2 class="font-semibold text-slate-900">{{ t('selectionStatistics') }}</h2></div><p class="mt-2 text-sm text-slate-500">{{ t('selectionIntro') }}</p></div><ChartNoAxesCombined class="h-5 w-5 shrink-0 text-slate-400" /></div><div v-if="data.selection_statistics.length" class="mt-7 space-y-5"><div v-for="item in data.selection_statistics" :key="item.code"><div class="mb-2 flex items-center justify-between gap-4 text-sm"><span class="text-slate-600">{{ t(selectionLabels[item.code] || item.code) }}</span><span class="font-semibold text-slate-900">{{ item.value }}</span></div><div class="h-2 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-slate-900 transition-all" :style="{ width: width(item) }" /></div></div></div><div v-else class="mt-7 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">{{ t('selectionActivityEmpty') }}</div></Card>
 
-          <Card class="rounded-2xl p-6 shadow-sm"><div class="flex items-center justify-between gap-3"><div class="flex items-center gap-2"><span class="grid h-8 w-8 place-items-center rounded-lg bg-violet-50 text-violet-700"><BellRing class="h-4 w-4" /></span><h2 class="font-semibold text-slate-900">{{ t('latestSelectionMessages') }}</h2></div><Clock3 class="h-5 w-5 text-slate-400" /></div><div v-if="data.recent_selection_activity.length" class="mt-5 divide-y divide-slate-100"><div v-for="item in data.recent_selection_activity" :key="item.id" class="flex items-center gap-3 py-3.5"><span class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{{ item.student_name.slice(0, 1) }}</span><div class="min-w-0 flex-1"><p class="truncate text-sm font-medium text-slate-800">{{ activityText(item) }}</p><p class="mt-1 text-xs text-slate-500">{{ activityStatus(item.status) }}</p></div><ChevronRight class="h-4 w-4 shrink-0 text-slate-300" /></div></div><div v-else class="mt-7 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">{{ t('selectionActivityEmpty') }}</div></Card>
+          <Card class="rounded-2xl p-6 shadow-sm"><NotificationInbox mode="latest" :workspace="activeRole" /></Card>
         </section>
 
         <section class="mt-6"><div class="mb-4 flex items-center justify-between"><div><h2 class="text-lg font-semibold text-slate-900">{{ t('quickActions') }}</h2><p class="mt-1 text-sm text-slate-500">{{ roleLabel }}</p></div></div><div class="grid gap-4 md:grid-cols-3"><RouterLink v-for="action in quickActions" :key="action.to" :to="action.to" class="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow-md"><span class="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-700 transition group-hover:bg-slate-950 group-hover:text-white"><component :is="action.icon" class="h-5 w-5" /></span><div class="mt-5 flex items-start justify-between gap-3"><div><h3 class="font-semibold text-slate-900">{{ action.label }}</h3><p v-if="action.description" class="mt-1.5 text-sm leading-6 text-slate-600">{{ action.description }}</p></div><ArrowUpRight class="h-4 w-4 shrink-0 text-slate-400 transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-slate-900" /></div></RouterLink></div></section>

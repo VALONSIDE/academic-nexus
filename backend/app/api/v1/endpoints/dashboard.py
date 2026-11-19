@@ -1,6 +1,6 @@
 """Dashboard metrics derived from real platform state, not placeholder copy."""
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, false
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.ai import AiProjectDailyUsage, AiUsageEvent
@@ -11,10 +11,12 @@ from app.models.user import MentorProfile, StudentProfile, User
 from app.schemas.dashboard import DashboardBreakdown, DashboardMetric, DashboardResponse, DashboardSelectionActivity
 from app.core.config import get_settings
 from app.services.ai.quota import current_usage_date, quota_snapshot as ai_quota_snapshot
-from app.services.resources import quota_snapshot as resource_quota_snapshot
+from app.services.resources import quota_snapshot as resource_quota_snapshot, resource_visibility
+from app.services.contacts import school
 from app.services.admin_scope import institution_admin_abbrs, is_super_admin
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from typing import Literal
 
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard / 概览"])
@@ -56,13 +58,21 @@ def _selection_data(db: DbSession, user: User, role: str, institutions: set[str]
 
 
 @router.get("", response_model=DashboardResponse, summary="Read workspace dashboard / 获取工作台概览")
-def read_dashboard(current_user: CurrentUser, db: DbSession) -> DashboardResponse:
-    role = _role(current_user)
+def read_dashboard(current_user: CurrentUser, db: DbSession,
+                   workspace: Literal["admin", "student", "mentor"] | None = None) -> DashboardResponse:
+    role = workspace or _role(current_user)
+    if workspace:
+        codes = {role.code for role in current_user.roles}
+        allowed = bool(codes & {"admin", "super_admin", "institution_admin"}) if role == "admin" else role in codes
+        if not allowed:
+            raise HTTPException(403, detail={"code": "workspace_forbidden"})
     scoped_institutions = None if is_super_admin(current_user) else institution_admin_abbrs(db, current_user) if role == "admin" else None
     resource_statement = select(Resource.resource_type, func.count(Resource.id)).where(
         Resource.tenant_id == current_user.tenant_id,
         Resource.is_published.is_(True),
     )
+    if role != "admin":
+        resource_statement = resource_statement.where(resource_visibility(current_user))
     if scoped_institutions is not None:
         _, mentor_ids = _institution_user_id_queries(scoped_institutions)
         resource_statement = resource_statement.where(Resource.owner_user_id.in_(mentor_ids))
@@ -112,7 +122,7 @@ def read_dashboard(current_user: CurrentUser, db: DbSession) -> DashboardRespons
         )
     if role == "student":
         ai_quota = ai_quota_snapshot(db, current_user.id)
-        mentors = _count(db, select(func.count(User.id)).where(User.tenant_id == current_user.tenant_id, User.is_active.is_(True), User.roles.any(code="mentor")))
+        mentors = _count(db, select(func.count(User.id)).where(User.tenant_id == current_user.tenant_id, User.is_active.is_(True), User.roles.any(code="mentor"), User.mentor_profile.has((MentorProfile.institution_abbr == school(current_user)) & MentorProfile.profile_completed_at.is_not(None)) if school(current_user) else false()))
         db.commit()
         return DashboardResponse(
             role="student",
@@ -129,7 +139,7 @@ def read_dashboard(current_user: CurrentUser, db: DbSession) -> DashboardRespons
         )
     ai_quota = ai_quota_snapshot(db, current_user.id)
     resource_quota = resource_quota_snapshot(db, current_user.id)
-    candidates = _count(db, select(func.count(User.id)).where(User.tenant_id == current_user.tenant_id, User.is_active.is_(True), User.roles.any(code="student")))
+    candidates = _count(db, select(func.count(User.id)).where(User.tenant_id == current_user.tenant_id, User.is_active.is_(True), User.roles.any(code="student"), User.student_profile.has((StudentProfile.institution_abbr == school(current_user)) & StudentProfile.profile_completed_at.is_not(None)) if school(current_user) else false()))
     own_resources = _count(db, select(func.count(Resource.id)).where(Resource.tenant_id == current_user.tenant_id, Resource.owner_user_id == current_user.id))
     db.commit()
     return DashboardResponse(

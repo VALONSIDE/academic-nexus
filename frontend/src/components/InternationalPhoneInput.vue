@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import 'flag-icons/css/flag-icons.min.css'
 import { AsYouType, getCountries, getCountryCallingCode, parsePhoneNumberFromString, type CountryCode } from 'libphonenumber-js/max'
 import { useI18n } from 'vue-i18n'
 
@@ -18,13 +19,7 @@ const { locale, t } = useI18n()
 const country = ref<CountryCode>('CN')
 const display = ref('')
 const valid = ref(true)
-
-function countryFlag(code: CountryCode) {
-  return String.fromCodePoint(...code
-    .toUpperCase()
-    .split('')
-    .map(character => 0x1F1E6 + character.charCodeAt(0) - 65))
-}
+let lastEmitted: string | null = null
 
 const countryOptions = computed<SelectOption[]>(() => {
   const names = typeof Intl.DisplayNames === 'function'
@@ -33,7 +28,8 @@ const countryOptions = computed<SelectOption[]>(() => {
   return getCountries()
     .map(code => ({
       value: code,
-      label: `${countryFlag(code)} ${names?.of(code) || code} (+${getCountryCallingCode(code)})`,
+      label: `${names?.of(code) || code} (+${getCountryCallingCode(code)})`,
+      iconClass: `fi fi-${code.toLowerCase()}`,
     }))
     .sort((left, right) => left.label.localeCompare(right.label, locale.value))
 })
@@ -54,7 +50,7 @@ function syncFromModel(value: string) {
     if (parsed.country) country.value = parsed.country
     display.value = parsed.formatNational()
     setValidity(parsed.isValid())
-    if (parsed.isValid() && model.value !== parsed.number) model.value = parsed.number
+    if (parsed.isValid() && model.value !== parsed.number) { lastEmitted = parsed.number; model.value = parsed.number }
   } else {
     display.value = value
     setValidity(false)
@@ -65,7 +61,8 @@ function formatInput(value: string | undefined) {
   const formatter = new AsYouType(country.value)
   display.value = formatter.input(value || '')
   const number = formatter.getNumber()
-  model.value = number?.number || ''
+  lastEmitted = number?.number || display.value
+  model.value = lastEmitted
   setValidity(!display.value || Boolean(number?.isValid()))
 }
 
@@ -78,12 +75,12 @@ function changeCountry(next: string) {
   if (nationalNumber) formatInput(nationalNumber)
 }
 
-watch(model, syncFromModel, { immediate: true })
+watch(model, (value) => { if (value !== lastEmitted) syncFromModel(value) }, { immediate: true })
 </script>
 
 <template>
   <div>
-    <div class="grid gap-2 sm:grid-cols-[minmax(13rem,0.8fr)_minmax(0,1.2fr)]">
+    <div class="grid gap-3">
       <Select :model-value="country" :options="countryOptions" :disabled="props.disabled" @update:model-value="changeCountry" />
       <Input
         :model-value="display"

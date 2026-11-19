@@ -6,13 +6,14 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models.selection import MentorSelection, MentorSelectionSetting, SelectionSettings, StudentSelectionSetting
 from app.models.user import User
 from app.services.admin_scope import user_institution_abbr
+from app.services.workspace_events import selection_event
 
 ACTIVE = ("pending_student", "pending_mentor")
 
@@ -104,12 +105,18 @@ def _reserve_available(db: Session, mentor_id: UUID, setting: MentorSelectionSet
         _error("mentor_capacity_full")
 
 
+def student_choice_count(db: Session, student_id: UUID) -> int:
+    return db.scalar(select(func.count()).select_from(MentorSelection).where(
+        MentorSelection.student_user_id == student_id, MentorSelection.status == "pending_student",
+    )) or 0
+
+
 def _assert_student_choice_available(db: Session, student_id: UUID, settings: SelectionSettings) -> StudentSelectionSetting:
     item = student_settings(db, student_id, lock=True)
     if item.is_exempt:
         return item
     limit = item.choice_limit if item.choice_limit is not None else settings.default_student_choice_limit
-    used = db.scalar(select(func.count()).select_from(MentorSelection).where(MentorSelection.student_user_id == student_id, MentorSelection.status == "pending_student")) or 0
+    used = student_choice_count(db, student_id)
     if int(used) >= limit:
         _error("student_choice_limit_reached")
     return item
@@ -129,13 +136,16 @@ def _confirm(db: Session, selection: MentorSelection) -> MentorSelection:
     )
     if other_confirmed is not None:
         _error("student_already_matched")
-    db.execute(
-        update(MentorSelection)
-        .where(MentorSelection.student_user_id == selection.student_user_id, MentorSelection.id != selection.id, MentorSelection.status.in_(ACTIVE))
-        .values(status="cancelled")
-    )
+    obsolete = db.scalars(select(MentorSelection).where(
+        MentorSelection.student_user_id == selection.student_user_id,
+        MentorSelection.id != selection.id, MentorSelection.status.in_(ACTIVE),
+    ).with_for_update()).all()
+    for item in obsolete:
+        item.status = "cancelled"
+        selection_event(db, item, "selection_closed_other", recipient_role="mentor")
     selection.status = "confirmed"
     selection.confirmed_at = datetime.now(timezone.utc)
+    selection_event(db, selection, "selection_confirmed")
     return selection
 
 
@@ -152,9 +162,13 @@ def student_choose(db: Session, student: User, mentor_id: UUID, note: str | None
     if existing and existing.status == "confirmed":
         _error("already_confirmed")
     if existing and existing.status == "pending_mentor":
+        confirmed, invitations = capacity_counts(db, mentor_id)
+        if not mentor_setting.is_exempt and confirmed + invitations > capacity_of(mentor_setting, settings.default_capacity):
+            _error("mentor_capacity_full")
         return _confirm(db, existing)
-    if existing is None or existing.status != "pending_student":
-        _assert_student_choice_available(db, student.id, settings)
+    if existing and existing.status == "pending_student":
+        return existing
+    _assert_student_choice_available(db, student.id, settings)
     if mentor_setting.selection_mode == "first_come":
         _reserve_available(db, mentor_id, mentor_setting, settings.default_capacity)
         if existing is None:
@@ -170,15 +184,12 @@ def student_choose(db: Session, student: User, mentor_id: UUID, note: str | None
         db.flush()
     else:
         existing.status, existing.student_note = "pending_student", note
-    student_setting = student_settings(db, student.id)
-    limit = student_setting.choice_limit if student_setting.choice_limit is not None else settings.default_student_choice_limit
-    if not student_setting.is_exempt and limit == 1:
-        db.execute(update(MentorSelection).where(MentorSelection.student_user_id == student.id, MentorSelection.id != existing.id, MentorSelection.status == "pending_student").values(status="cancelled"))
+    selection_event(db, existing, "selection_applied", actor_id=student.id, recipient_role="mentor")
     return existing
 
 
 def student_cancel(db: Session, student: User, selection_id: UUID | None = None) -> None:
-    _ensure_open(db, student.tenant_id)
+    tenant_settings(db, student.tenant_id, lock=True)
     statement = select(MentorSelection).where(
         MentorSelection.student_user_id == student.id,
         MentorSelection.status.in_(("pending_student", "pending_mentor")),
@@ -188,7 +199,9 @@ def student_cancel(db: Session, student: User, selection_id: UUID | None = None)
     item = db.scalar(statement.order_by(MentorSelection.updated_at.desc()).with_for_update())
     if item is None:
         _error("no_pending_choice", status.HTTP_404_NOT_FOUND)
+    kind = "selection_invitation_declined" if item.status == "pending_mentor" else "selection_cancelled"
     item.status = "cancelled"
+    selection_event(db, item, kind, actor_id=student.id, recipient_role="mentor")
 
 
 def mentor_invite(db: Session, mentor: User, student_id: UUID, note: str | None) -> MentorSelection:
@@ -202,13 +215,19 @@ def mentor_invite(db: Session, mentor: User, student_id: UUID, note: str | None)
     existing = db.scalar(select(MentorSelection).where(MentorSelection.student_user_id == student_id, MentorSelection.mentor_user_id == mentor.id).with_for_update())
     if existing and existing.status == "confirmed":
         _error("already_confirmed")
-    if existing is None or existing.status != "pending_mentor":
-        _reserve_available(db, mentor.id, mentor_setting, settings.default_capacity)
+    if existing and existing.status == "pending_mentor":
+        return existing
+    _reserve_available(db, mentor.id, mentor_setting, settings.default_capacity)
+    if existing and existing.status == "pending_student":
+        existing.mentor_note = note
+        return _confirm(db, existing)
     if existing is None:
         existing = MentorSelection(tenant_id=mentor.tenant_id, student_user_id=student_id, mentor_user_id=mentor.id, status="pending_mentor", mentor_note=note)
         db.add(existing)
+        db.flush()
     else:
         existing.status, existing.mentor_note = "pending_mentor", note
+    selection_event(db, existing, "selection_invited", actor_id=mentor.id, recipient_role="student")
     return existing
 
 
@@ -218,6 +237,9 @@ def mentor_confirm(db: Session, mentor: User, selection_id: UUID, note: str | No
     item = db.scalar(select(MentorSelection).where(MentorSelection.id == selection_id, MentorSelection.mentor_user_id == mentor.id).with_for_update())
     if item is None:
         _error("selection_not_found", status.HTTP_404_NOT_FOUND)
+    student = _get_role_user(db, item.student_user_id, mentor.tenant_id, "student")
+    if not user_institution_abbr(mentor) or user_institution_abbr(mentor) != user_institution_abbr(student):
+        _error("institution_scope_forbidden", status.HTTP_403_FORBIDDEN)
     if item.status != "pending_student":
         _error("selection_not_pending")
     _reserve_available(db, mentor.id, mentor_setting, settings.default_capacity)
@@ -226,11 +248,13 @@ def mentor_confirm(db: Session, mentor: User, selection_id: UUID, note: str | No
 
 
 def mentor_reject(db: Session, mentor: User, selection_id: UUID, note: str | None) -> MentorSelection:
-    _ensure_open(db, mentor.tenant_id)
+    tenant_settings(db, mentor.tenant_id, lock=True)
     item = db.scalar(select(MentorSelection).where(MentorSelection.id == selection_id, MentorSelection.mentor_user_id == mentor.id).with_for_update())
     if item is None:
         _error("selection_not_found", status.HTTP_404_NOT_FOUND)
     if item.status not in ("pending_student", "pending_mentor"):
         _error("selection_not_pending")
-    item.status, item.mentor_note = "rejected", note
+    kind = "selection_withdrawn" if item.status == "pending_mentor" else "selection_rejected"
+    item.status, item.mentor_note = ("cancelled" if kind == "selection_withdrawn" else "rejected"), note
+    selection_event(db, item, kind, actor_id=mentor.id, recipient_role="student")
     return item

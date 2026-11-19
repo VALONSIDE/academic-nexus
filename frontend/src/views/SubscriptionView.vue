@@ -57,12 +57,14 @@ async function load() {
 }
 
 async function redeem() {
-  if (!auth.state.token || !key.value.trim() || redeeming.value || isPremium.value) return
+  const token = auth.state.token
+  if (!token || !key.value.trim() || redeeming.value || isPremium.value) return
   redeeming.value = true
   error.value = ''
   notice.value = ''
   try {
-    subscription.value = await authApi.activateSubscriptionKey(auth.state.token, key.value)
+    subscription.value = await authApi.activateSubscriptionKey(token, key.value)
+    auth.setSubscriptionPlan(token, subscription.value.plan_code)
     key.value = ''
     notice.value = t('subscriptionActivated')
   } catch (exception) {

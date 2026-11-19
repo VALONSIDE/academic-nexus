@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -20,6 +20,7 @@ DbSession = Annotated[Session, Depends(get_db)]
 def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     db: DbSession,
+    request: Request = None,
 ) -> User:
     """Resolve a signed JWT into an active user / 将已签名 JWT 解析为有效用户。"""
     unauthorized = HTTPException(
@@ -39,6 +40,9 @@ def get_current_user(
     user = db.scalar(select(User).options(selectinload(User.roles)).where(User.id == user_id))
     if user is None or not user.is_active or payload.get("auth_version") != user.auth_version:
         raise unauthorized
+    if request is not None and request.url.path.startswith(("/api/v1/ai", "/api/v1/matching", "/api/v1/selection", "/api/v1/resources", "/api/v1/mentor/resources", "/api/v1/contacts")):
+        if not any(role.code in ADMINISTRATOR_ROLES for role in user.roles) and any(role.code in {"student", "mentor"} for role in user.roles) and (not user.email or not user.wechat):
+            raise HTTPException(403, detail={"code": "contact_profile_required"})
     return user
 
 

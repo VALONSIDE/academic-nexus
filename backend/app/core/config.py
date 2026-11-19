@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     api_docs_enabled: bool = False
     # Product release label shown by OpenAPI and operational tooling.
     # NR means Not Released / 尚未发布.
-    app_version: str = "alpha-0917-NR"
+    app_version: str = "Beta V1.0"
     database_url: str = "postgresql+psycopg://academicnexus:academicnexus@localhost:5432/academicnexus"
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret_key: str
@@ -36,11 +36,22 @@ class Settings(BaseSettings):
     initial_admin_username: str = "ACADEMICNEXUS_ADMIN"
     default_tenant_slug: str = "academicnexus-pilot"
     default_tenant_name: str = "AcademicNexus Pilot"
+    deepseek_api_key: SecretStr = SecretStr("")
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_light_model: str = "deepseek-flash"
+    deepseek_standard_model: str = "deepseek-flash"
+    deepseek_expert_model: str = "deepseek-v4-pro"
+    openai_api_key: SecretStr = SecretStr("")
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-4.1-mini"
+    qwen_api_key: SecretStr = SecretStr("")
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    qwen_model: str = "qwen-plus"
     minimax_api_key: str = ""
     minimax_base_url: str = "https://api.minimaxi.com/anthropic"
     minimax_model: str = "MiniMax-M3"
-    minimax_light_model: str = "MiniMax-M2.5-highspeed"
-    minimax_standard_model: str = "MiniMax-M2.7"
+    minimax_light_model: str = "MiniMax-M3.1-Flash"
+    minimax_standard_model: str = "MiniMax-M3.1-Flash"
     minimax_expert_model: str = "MiniMax-M3"
     siliconflow_api_key: SecretStr = SecretStr("")
     siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
@@ -64,6 +75,18 @@ class Settings(BaseSettings):
     resource_storage_path: str = "/app/storage/resources"
     resource_max_upload_mb: int = 200
     mentor_resource_default_quota_mb: int = 200
+
+    @model_validator(mode="after")
+    def production_security(self):
+        if self.app_env.lower() == "production":
+            for value in (self.jwt_secret_key, self.access_key_pepper, self.initial_admin_password):
+                if "CHANGE_ME" in value or len(value.strip()) < 32:
+                    raise ValueError("Production security credentials must be independent random secrets of at least 32 characters")
+            if self.jwt_secret_key == self.access_key_pepper:
+                raise ValueError("Production JWT and Access Key secrets must differ")
+            if self.api_docs_enabled or "*" in self.cors_origins_list:
+                raise ValueError("Production API docs must be disabled and CORS must use explicit origins")
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:

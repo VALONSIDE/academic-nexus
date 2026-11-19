@@ -3,7 +3,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -40,6 +40,7 @@ class AiMessage(Base):
     conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ai_conversations.id", ondelete="CASCADE"), index=True)
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
+    action_card: Mapped[dict | None] = mapped_column(JSON)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
@@ -121,3 +122,15 @@ class AiUsageEvent(Base):
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AiTurnRequest(Base):
+    __tablename__ = "ai_turn_requests"
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(16), default="running")
+    event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("ai_usage_events.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("ai_messages.id", ondelete="SET NULL"), nullable=True)
+    assistant_message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("ai_messages.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

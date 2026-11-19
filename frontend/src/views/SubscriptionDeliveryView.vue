@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import InstitutionReminder from '@/components/InstitutionReminder.vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft, CheckCircle2, FileKey2, FileSpreadsheet, KeyRound, ShieldAlert, Sparkles, UserRoundCheck, UsersRound } from 'lucide-vue-next'
 
@@ -15,6 +17,20 @@ type Stage = 'import' | 'select' | 'deliver'
 type DeliveryMode = 'activate' | 'pdf'
 
 const auth = useAuthStore()
+const route = useRoute()
+const isSuperAdmin = computed(() => auth.state.user?.roles.some(role => role === 'admin' || role === 'super_admin'))
+const reminderSchools = ref<SelectOption[]>([])
+watch(isSuperAdmin, async (allowed, _, onCleanup) => {
+  reminderSchools.value = []
+  if (!allowed || !auth.state.token) return
+  let current = true
+  onCleanup(() => { current = false })
+  try {
+    const institutions = await authApi.subscriptionInstitutions(auth.state.token)
+    if (current) reminderSchools.value = institutions.map(item => ({ value: item.institution_abbr, label: item.institution_name_zh }))
+  } catch { /* Reminders remain unavailable without the institution list. */ }
+}, { immediate: true })
+
 const { t } = useI18n()
 const stage = ref<Stage>('import')
 const mode = ref<DeliveryMode>('pdf')
@@ -200,6 +216,7 @@ onBeforeUnmount(clearSensitiveState)
         <ol class="grid border-b border-slate-200 sm:grid-cols-3"><li v-for="(item, index) in [{ id: 'import', label: 'subscriptionDeliveryStepImport' }, { id: 'select', label: 'subscriptionDeliveryStepSelect' }, { id: 'deliver', label: 'subscriptionDeliveryStepDeliver' }]" :key="item.id" class="flex items-center gap-3 px-6 py-4 text-sm" :class="stage === item.id ? 'bg-slate-50 font-semibold text-slate-950' : 'text-slate-400'"><span class="grid h-6 w-6 place-items-center rounded-full border text-xs" :class="stage === item.id ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-300'">{{ index + 1 }}</span>{{ t(item.label) }}</li></ol>
       </section>
 
+      <div v-if="isSuperAdmin" class="mt-5"><InstitutionReminder :institutions="reminderSchools" :initial-institution="typeof route.query.institution === 'string' ? route.query.institution : undefined" initial-category="delivery" /></div>
       <Card v-if="stage === 'import'" class="mt-6 p-6 sm:p-8"><div class="mx-auto max-w-2xl text-center"><span class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-slate-950 text-white"><FileSpreadsheet class="h-6 w-6" /></span><h2 class="mt-5 text-xl font-semibold text-slate-950">{{ t('uploadSubscriptionReceipt') }}</h2><p class="mt-3 text-sm leading-6 text-slate-600">{{ t('subscriptionDeliveryExcelHint') }}</p><label class="mt-6 inline-flex cursor-pointer items-center justify-center rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"><FileSpreadsheet class="mr-2 h-4 w-4" />{{ loading ? t('loading') : t('uploadSubscriptionReceipt') }}<input class="sr-only" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="loading" @change="importReceipt" /></label></div></Card>
 
       <section v-else-if="stage === 'select'" class="mt-6"><Card class="overflow-hidden p-0"><div class="flex flex-col gap-3 border-b border-slate-200 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div><h2 class="font-semibold text-slate-900">{{ t('subscriptionDeliveryStepSelect') }}</h2><p class="mt-1 text-sm text-slate-500">{{ t('subscriptionDeliverySelected', { count: selectedItems.length }) }}</p></div><Button type="button" :disabled="loading || !selectedItems.length" @click="continueToRecipients">{{ loading ? t('loading') : t('subscriptionDeliveryNext') }}<UsersRound class="ml-2 h-4 w-4" /></Button></div><div class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="w-14 px-5 py-3 sm:px-6"></th><th class="px-3 py-3">Key</th><th class="px-3 py-3">{{ t('subscriptionTier') }}</th><th class="px-3 py-3">{{ t('institution') }}</th><th class="px-5 py-3 sm:px-6">{{ t('preRegistrationStatus') }}</th></tr></thead><tbody class="divide-y divide-slate-100"><tr v-for="item in results" :key="`${item.row_number}-${item.key}`" :class="item.status === 'available' ? 'bg-white' : 'bg-slate-50 text-slate-400'"><td class="px-5 py-4 sm:px-6"><input v-if="item.status === 'available'" :checked="selectedKeys.includes(item.key)" class="h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-900" type="checkbox" :aria-label="item.key" @change="toggleKey(item.key, ($event.target as HTMLInputElement).checked)" /></td><td class="px-3 py-4 font-mono text-xs font-semibold tracking-wide text-slate-800">{{ item.key }}</td><td class="px-3 py-4">{{ planLabel(item.plan_code) }}</td><td class="px-3 py-4">{{ item.institution_name_zh || '—' }}<span v-if="item.institution_abbr" class="ml-1.5 font-mono text-xs text-slate-400">{{ item.institution_abbr }}</span></td><td class="px-5 py-4 sm:px-6"><span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="item.status === 'available' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'">{{ statusLabel(item.status) }}</span></td></tr></tbody></table></div></Card></section>
@@ -240,7 +257,7 @@ onBeforeUnmount(clearSensitiveState)
               <button type="button" class="rounded-xl border p-4 text-left transition" :class="mode === 'pdf' ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 hover:border-slate-400'" @click="mode = 'pdf'"><span class="font-semibold">{{ t('subscriptionDeliveryExportPdf') }}</span><span class="mt-1 block text-sm leading-6" :class="mode === 'pdf' ? 'text-slate-300' : 'text-slate-500'">{{ t('subscriptionDeliveryExportPdfHint') }}</span></button>
               <button type="button" class="rounded-xl border p-4 text-left transition" :class="mode === 'activate' ? 'border-rose-700 bg-rose-50 text-rose-950' : 'border-slate-200 hover:border-slate-400'" @click="mode = 'activate'"><span class="font-semibold">{{ t('subscriptionDeliveryDirectActivation') }}</span><span class="mt-1 block text-sm leading-6 text-slate-500">{{ t('subscriptionDeliveryDirectActivationHint') }}</span></button>
             </div>
-            <button class="mt-6 inline-flex h-10 w-full items-center justify-center rounded-lg bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50" :class="mode === 'activate' ? 'bg-rose-700 hover:bg-rose-800' : ''" type="button" :disabled="submitting || !deliveryReady" @click="submitDelivery"><CheckCircle2 class="mr-2 h-4 w-4" />{{ submitting ? t('loading') : mode === 'activate' ? t('subscriptionDeliveryActivateAndDestroy') : t('subscriptionDeliveryExportZip') }}</button>
+            <Button class="mt-6 w-full" :class="mode === 'activate' ? 'bg-rose-700 hover:bg-rose-800' : ''" type="button" :disabled="submitting || !deliveryReady" @click="submitDelivery"><CheckCircle2 class="mr-2 h-4 w-4" />{{ submitting ? t('loading') : mode === 'activate' ? t('subscriptionDeliveryActivateAndDestroy') : t('subscriptionDeliveryExportZip') }}</Button>
             <p class="mt-3 text-xs leading-5 text-slate-500">{{ t('subscriptionDeliveryBrowserOnly') }}</p>
           </Card>
         </div>

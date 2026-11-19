@@ -10,6 +10,7 @@ import TagInput from '@/components/TagInput.vue'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import Textarea from '@/components/ui/textarea/Textarea.vue'
 import { Select } from '@/components/ui/select'
 import { useAuthStore } from '@/stores/auth'
 import type { LearningResource, MentorResourceQuota, ResourceType } from '@/types/auth'
@@ -111,6 +112,7 @@ function onFile(event: Event) {
 
 async function upload() {
   if (!auth.state.token || !validCourseDetails()) return
+  if (!file.value && !form.external_url.trim()) { error.value = t('resourceLocationRequired'); return }
   uploading.value = true
   error.value = ''
   notice.value = ''
@@ -162,35 +164,50 @@ onMounted(load)
 
       <Card v-if="showForm" class="mt-7 p-6">
         <h2 class="font-semibold text-slate-900">{{ t('uploadResource') }}</h2>
-        <form class="mt-6 grid gap-5 md:grid-cols-2" @submit.prevent="upload">
-          <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('resourceType') }}<Select v-model="form.resource_type" :options="resourceTypeOptions" /></label>
-          <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('resourceTitle') }}<Input v-model="form.title" required /></label>
-          <label class="grid gap-1.5 text-sm font-medium text-slate-700 md:col-span-2">{{ t('resourceDescription') }}<textarea v-model="form.description" class="min-h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:ring-3 focus:ring-sky-100" /></label>
-          <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('resourceTopics') }}<TagInput v-model="form.topics" :placeholder="t('tagInputPlaceholder')" /><span class="text-xs font-normal text-slate-500">{{ t('tagInputHint') }}</span></label>
-          <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('resourceTags') }}<TagInput v-model="form.tags" :placeholder="t('tagInputPlaceholder')" /><span class="text-xs font-normal text-slate-500">{{ t('tagInputHint') }}</span></label>
-          <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('resourceUrl') }} <span class="font-normal text-slate-400">{{ t('optional') }}</span><Input v-model="form.external_url" type="url" placeholder="https://" /></label>
-          <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('resourceFile') }} <span class="font-normal text-slate-400">{{ t('optional') }}</span><input class="h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md,.zip" @change="onFile" /></label>
-
-          <template v-if="form.resource_type === 'course'">
-            <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('provider') }}<Input v-model="form.provider" /></label>
-            <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('level') }}<Select v-model="form.level" :options="courseLevelOptions" :placeholder="t('selectCourseLevel')" /></label>
-            <fieldset class="grid gap-1.5 text-sm font-medium text-slate-700 md:col-span-2"><legend>{{ t('duration') }}</legend><div class="grid grid-cols-2 gap-3"><label class="flex items-center gap-2"><Input v-model="form.duration_hours" type="number" inputmode="numeric" min="0" max="9999" /><span class="shrink-0 font-normal text-slate-500">{{ t('hours') }}</span></label><label class="flex items-center gap-2"><Input v-model="form.duration_minutes" type="number" inputmode="numeric" min="0" max="59" /><span class="shrink-0 font-normal text-slate-500">{{ t('minutes') }}</span></label></div></fieldset>
-          </template>
-          <template v-else>
-            <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('authors') }}<Input v-model="form.authors" /></label>
-            <label v-if="form.resource_type === 'paper'" class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('publication') }}<Input v-model="form.publication" /></label>
-            <label v-if="form.resource_type === 'paper'" class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('doi') }}<Input v-model="form.doi" /></label>
-            <label v-if="form.resource_type === 'book'" class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('publisher') }}<Input v-model="form.publisher" /></label>
-            <label v-if="form.resource_type === 'book'" class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('isbn') }}<Input v-model="form.isbn" /></label>
-            <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('publicationYear') }}<Input v-model="form.publication_year" type="number" min="1000" max="2100" /></label>
-          </template>
-          <p class="md:col-span-2 text-xs leading-5 text-slate-500">{{ t('resourceLocationHint') }}</p>
-          <div class="flex gap-2 md:col-span-2"><Button type="submit" :disabled="uploading">{{ uploading ? t('loading') : t('uploadResource') }}</Button><Button type="button" variant="outline" @click="showForm = false; resetForm()">{{ t('cancel') }}</Button></div>
+        <p class="mt-2 text-sm text-slate-500">{{ t('resourceRequiredLegend') }}</p>
+        <form class="mt-6 space-y-6" @submit.prevent="upload">
+          <fieldset class="grid gap-4 rounded-xl border border-slate-200 p-4 md:grid-cols-2 sm:p-5">
+            <legend class="px-2 font-semibold">{{ t('resourceCoreFields') }}</legend>
+            <label class="grid gap-2 text-sm font-medium"><span>{{ t('resourceType') }} <span class="text-rose-700">*</span></span><Select v-model="form.resource_type" :options="resourceTypeOptions" /></label>
+            <label class="grid gap-2 text-sm font-medium"><span>{{ t('resourceTitle') }} <span class="text-rose-700">*</span></span><Input v-model="form.title" required minlength="2" maxlength="240" /></label>
+            <label class="grid gap-2 text-sm font-medium md:col-span-2"><span>{{ t('resourceDescription') }} <span class="text-slate-500">· {{ t('optional') }}</span></span><Textarea v-model="form.description" maxlength="5000" /></label>
+          </fieldset>
+          <fieldset class="grid gap-4 rounded-xl border border-slate-200 p-4 md:grid-cols-2 sm:p-5">
+            <legend class="px-2 font-semibold">{{ t('resourceTypeFields') }}</legend>
+            <template v-if="form.resource_type === 'course'">
+              <label class="grid gap-2 text-sm font-medium"><span>{{ t('level') }} <span class="text-rose-700">*</span></span><Select v-model="form.level" :options="courseLevelOptions" :placeholder="t('selectCourseLevel')" /></label>
+              <div class="grid gap-2 text-sm font-medium"><p>{{ t('duration') }} <span class="text-rose-700">*</span></p><div class="grid grid-cols-2 gap-3"><label class="flex items-center gap-2"><Input v-model="form.duration_hours" :aria-label="t('hours')" type="number" min="0" max="9999" /><span>{{ t('hours') }}</span></label><label class="flex items-center gap-2"><Input v-model="form.duration_minutes" :aria-label="t('minutes')" type="number" min="0" max="59" /><span>{{ t('minutes') }}</span></label></div></div>
+              <label class="grid gap-2 text-sm font-medium"><span>{{ t('provider') }} · {{ t('optional') }}</span><Input v-model="form.provider" maxlength="160" /></label>
+            </template>
+            <template v-else>
+              <label class="grid gap-2 text-sm font-medium"><span>{{ t('authors') }} · {{ t('optional') }}</span><Input v-model="form.authors" maxlength="800" /></label>
+              <label v-if="form.resource_type === 'paper'" class="grid gap-2 text-sm font-medium"><span>{{ t('publication') }} · {{ t('optional') }}</span><Input v-model="form.publication" maxlength="400" /></label>
+              <label v-if="form.resource_type === 'paper'" class="grid gap-2 text-sm font-medium"><span>{{ t('doi') }} · {{ t('optional') }}</span><Input v-model="form.doi" maxlength="200" /></label>
+              <label v-if="form.resource_type === 'book'" class="grid gap-2 text-sm font-medium"><span>{{ t('publisher') }} · {{ t('optional') }}</span><Input v-model="form.publisher" maxlength="400" /></label>
+              <label v-if="form.resource_type === 'book'" class="grid gap-2 text-sm font-medium"><span>{{ t('isbn') }} · {{ t('optional') }}</span><Input v-model="form.isbn" maxlength="64" /></label>
+              <label class="grid gap-2 text-sm font-medium"><span>{{ t('publicationYear') }} · {{ t('optional') }}</span><Input v-model="form.publication_year" type="number" min="1000" max="2100" /></label>
+            </template>
+          </fieldset>
+          <fieldset class="grid gap-4 rounded-xl border border-sky-200 bg-sky-50/40 p-4 md:grid-cols-2 sm:p-5">
+            <legend class="px-2 font-semibold">{{ t('resourceDeliveryFields') }} <span class="text-rose-700">*</span></legend>
+            <p class="text-sm text-slate-600 md:col-span-2">{{ t('resourceAtLeastOne') }}</p>
+            <label class="grid gap-2 text-sm font-medium">{{ t('resourceUrl') }}<Input v-model="form.external_url" type="url" maxlength="2048" placeholder="https://" /></label>
+            <label class="grid gap-2 text-sm font-medium">{{ t('resourceFile') }}<Input type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md,.zip" @change="onFile" /></label>
+          </fieldset>
+          <details class="rounded-xl border border-slate-200 px-4 py-3">
+            <summary class="cursor-pointer font-medium">{{ t('resourceOptionalFields') }}</summary>
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+              <label class="grid gap-2 text-sm font-medium">{{ t('resourceTopics') }}<TagInput v-model="form.topics" :placeholder="t('tagInputPlaceholder')" /></label>
+              <label class="grid gap-2 text-sm font-medium">{{ t('resourceTags') }}<TagInput v-model="form.tags" :placeholder="t('tagInputPlaceholder')" /></label>
+            </div><p class="mt-2 text-xs text-slate-500">{{ t('tagInputHint') }}</p>
+          </details>
+          <p v-if="error" class="text-sm text-rose-700" role="alert">{{ error }}</p>
+          <div class="flex justify-end gap-2"><Button type="button" variant="outline" :disabled="uploading" @click="showForm = false; resetForm()">{{ t('cancel') }}</Button><Button type="submit" :disabled="uploading">{{ uploading ? t('loading') : t('uploadResource') }}</Button></div>
         </form>
       </Card>
 
       <section class="mt-8"><h2 class="text-xl font-semibold text-slate-900">{{ t('manageResources') }}</h2><p v-if="loading" class="mt-5 text-sm text-slate-500">{{ t('loading') }}</p><ResourceCards v-else-if="resources.length" class="mt-5" :resources="resources" manageable @error="error = $event" @remove="remove" /><Card v-else class="mt-5 border-dashed bg-slate-50 p-8 text-center text-sm text-slate-600 shadow-none">{{ t('resourcesEmpty') }}</Card></section>
-      <p v-if="notice" class="mt-5 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{{ notice }}</p><p v-if="error" class="mt-5 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{{ error }}</p>
+      <p v-if="notice" class="mt-5 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{{ notice }}</p><p v-if="error && !showForm" class="mt-5 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{{ error }}</p>
     </div>
   </DashboardLayout>
 </template>

@@ -154,7 +154,7 @@ def test_expert_model_reserves_and_refunds_two_credits() -> None:
         assert refunded.credit_balance == 3
 
 
-def test_ai_context_includes_only_own_contact_and_published_resource_metadata() -> None:
+def test_ai_context_omits_private_contact_and_includes_only_visible_resource_metadata() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
@@ -181,6 +181,6 @@ def test_ai_context_includes_only_own_contact_and_published_resource_metadata() 
 
         profile_context = _profile_context(account)
         catalog = _resource_catalog_context(db, account)
-        assert "user@example.edu" in profile_context and "+8613800138000" in profile_context
+        assert "user@example.edu" not in profile_context and "+8613800138000" not in profile_context
         assert "Visible NLP course" in catalog
         assert "Hidden draft" not in catalog

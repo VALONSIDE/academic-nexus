@@ -23,16 +23,17 @@ def main():
     args = parser.parse_args()
     failures = []
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    if not re.fullmatch(r"alpha-\d{4}-NR", version):
+    beta = re.fullmatch(r"Beta V(0|[1-9]\d*)\.(0|[1-9]\d*)", version)
+    if not beta:
         failures.append("VERSION: unexpected product label")
-    package_version = "0.1.0-alpha." + version.removeprefix("alpha-").replace("-", "")
+    package_version = f"{beta[1]}.{beta[2]}.0-beta" if beta else None
     for filename in ("frontend/package.json", "frontend/package-lock.json"):
         data = json.loads((ROOT / filename).read_text(encoding="utf-8"))
         if data["version"] != package_version or ("packages" in data and data["packages"][""]["version"] != package_version):
             failures.append(f"{filename}: inconsistent package version")
     for filename in ("backend/app/core/config.py", "frontend/src/version.ts", ".env.example", "scripts/manage.sh"):
         content = (ROOT / filename).read_text(encoding="utf-8")
-        if version not in content or "alpha-0823-NR" in content:
+        if version not in content:
             failures.append(f"{filename}: inconsistent product version")
     source = (ROOT / "backend/app/core/config.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -46,7 +47,7 @@ def main():
     public_files = sorted(set(git("ls-files", "--cached", "--others", "--exclude-standard", "-z").split("\0")) - {""})
     secrets = []
     if args.check_local_secrets and (ROOT / ".env").exists():
-        secret_names = {"MINIMAX_API_KEY", "SILICONFLOW_API_KEY", "JWT_SECRET_KEY", "ACCESS_KEY_PEPPER",
+        secret_names = {"MINIMAX_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "QWEN_API_KEY", "SILICONFLOW_API_KEY", "JWT_SECRET_KEY", "ACCESS_KEY_PEPPER",
                         "POSTGRES_PASSWORD", "INITIAL_ADMIN_PASSWORD"}
         for line in (ROOT / ".env").read_text(encoding="utf-8-sig").splitlines():
             name, separator, value = line.partition("=")

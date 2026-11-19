@@ -52,6 +52,7 @@ class MatchedStudentResponse(BaseModel):
 
 
 class MentorRecommendationListResponse(BaseModel):
+    colleges: list[str] = Field(default_factory=list)
     algorithm_version: str
     ranking_mode: Literal["local", "semantic", "hybrid"] = "local"
     total: int
@@ -59,6 +60,7 @@ class MentorRecommendationListResponse(BaseModel):
 
 
 class StudentCandidateListResponse(BaseModel):
+    colleges: list[str] = Field(default_factory=list)
     algorithm_version: str
     ranking_mode: Literal["local", "semantic", "hybrid"] = "local"
     total: int

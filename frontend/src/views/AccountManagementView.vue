@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { BookUser, KeyRound, Mail, Phone, ShieldCheck, Sparkles, UserRound, X } from 'lucide-vue-next'
+import { BookUser, KeyRound, Mail, Phone, ShieldCheck, Sparkles, UserRound } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -8,7 +8,9 @@ import { ApiError, authApi } from '@/api/client'
 import AcademicPortraitForm from '@/components/AcademicPortraitForm.vue'
 import AiQuotaSummary from '@/components/AiQuotaSummary.vue'
 import DashboardLayout from '@/components/DashboardLayout.vue'
-import InternationalPhoneInput from '@/components/InternationalPhoneInput.vue'
+import ContactFields from '@/components/ContactFields.vue'
+import Dialog from '@/components/ui/dialog/Dialog.vue'
+import { emptyContacts, contactError } from '@/lib/contacts'
 import MentorStorageQuotaSummary from '@/components/MentorStorageQuotaSummary.vue'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -33,11 +35,12 @@ const accountRole = computed<Role>(() => {
   if (roles.some(role => ['admin', 'super_admin', 'institution_admin'].includes(role))) return 'admin'
   return academicRole.value || 'student'
 })
+const canEditContacts = computed(() => accountRole.value !== 'admin')
 const hasPortrait = computed(() => academicRole.value !== null)
 const activePanel = ref<Panel>(null)
 const profile = ref<StudentAcademicProfile | MentorAcademicProfile | null>(null)
-const contactPhone = ref('')
-const contactEmail = ref('')
+const contacts = ref(emptyContacts())
+const panelOpen = computed({ get: () => activePanel.value !== null, set: (value) => { if (!value) closePanel() } })
 const phoneValid = ref(true)
 const currentPassword = ref('')
 const newPassword = ref('')
@@ -49,9 +52,8 @@ const changingPassword = ref(false)
 const notice = ref('')
 const error = ref('')
 
-watch(() => [auth.state.user?.phone, auth.state.user?.email], ([phone, email]) => {
-  contactPhone.value = phone || ''
-  contactEmail.value = email || ''
+watch(() => auth.state.user, (user) => {
+  contacts.value = {phone: user?.phone || '', email: user?.email || '', wechat: user?.wechat || '', share_email: user?.share_email || false, share_phone: user?.share_phone || false, share_wechat: user?.share_wechat || false}
 }, { immediate: true })
 
 function openPanel(panel: Exclude<Panel, null>) {
@@ -67,7 +69,7 @@ function closePanel() {
 }
 
 watch(() => route.query.panel, (panel) => {
-  activePanel.value = panel === 'contact' || panel === 'password' || panel === 'portrait' || panel === 'quota' ? panel : null
+  activePanel.value = panel === 'contact' && canEditContacts.value ? 'contact' : panel === 'password' || panel === 'portrait' || panel === 'quota' ? panel : null
 }, { immediate: true })
 
 async function loadProfile() {
@@ -102,14 +104,16 @@ async function saveProfile(payload: StudentAcademicProfile | MentorAcademicProfi
 }
 
 async function saveContact() {
-  if (contactPhone.value && !phoneValid.value) {
+  if (!phoneValid.value) {
     error.value = t('invalidInternationalPhone')
     return
   }
+  const validation = contactError(contacts.value, Boolean(academicRole.value))
+  if (validation) { error.value = t(validation); return }
   savingContact.value = true
   error.value = ''
   try {
-    await auth.updateContact({ phone: contactPhone.value, email: contactEmail.value })
+    await auth.updateContact(contacts.value)
     notice.value = t('userSaved')
     closePanel()
   } catch (exception) {
@@ -167,7 +171,7 @@ onMounted(loadProfile)
       </Card>
 
       <div class="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        <button type="button" class="rounded-2xl border border-slate-200 bg-white p-6 text-left transition hover:border-sky-300 hover:shadow-sm" @click="openPanel('contact')"><span class="flex gap-2"><Phone class="h-6 w-6 text-sky-700" /><Mail class="h-6 w-6 text-sky-700" /></span><h2 class="mt-4 font-semibold">{{ t('contactInformation') }}</h2><p class="mt-2 text-sm leading-6 text-slate-600">{{ t('contactInformationDescription') }}</p></button>
+        <button v-if="canEditContacts" type="button" class="rounded-2xl border border-slate-200 bg-white p-6 text-left transition hover:border-sky-300 hover:shadow-sm" @click="openPanel('contact')"><span class="flex gap-2"><Phone class="h-6 w-6 text-sky-700" /><Mail class="h-6 w-6 text-sky-700" /></span><h2 class="mt-4 font-semibold">{{ t('contactInformation') }}</h2><p class="mt-2 text-sm leading-6 text-slate-600">{{ t('contactInformationDescription') }}</p></button>
         <button type="button" class="rounded-2xl border border-slate-200 bg-white p-6 text-left transition hover:border-sky-300 hover:shadow-sm" @click="openPanel('password')"><KeyRound class="h-6 w-6 text-sky-700" /><h2 class="mt-4 font-semibold">{{ t('changePassword') }}</h2><p class="mt-2 text-sm leading-6 text-slate-600">{{ t('passwordHint') }}</p></button>
         <button v-if="hasPortrait" type="button" class="rounded-2xl border border-slate-200 bg-white p-6 text-left transition hover:border-sky-300 hover:shadow-sm" @click="openPanel('portrait')"><BookUser class="h-6 w-6 text-sky-700" /><h2 class="mt-4 font-semibold">{{ t('managePortrait') }}</h2><p class="mt-2 text-sm leading-6 text-slate-600">{{ t('academicPortrait') }}</p></button>
         <button v-if="hasPortrait" type="button" class="rounded-2xl border border-slate-200 bg-white p-6 text-left transition hover:border-sky-300 hover:shadow-sm" @click="openPanel('quota')"><Sparkles class="h-6 w-6 text-sky-700" /><h2 class="mt-4 font-semibold">{{ t('personalQuota') }}</h2><p class="mt-2 text-sm leading-6 text-slate-600">{{ t('aiQuotaNote') }}</p></button>
@@ -177,15 +181,12 @@ onMounted(loadProfile)
       <p v-if="notice" class="mt-5 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{{ notice }}</p>
       <p v-if="error" class="mt-5 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{{ error }}</p>
 
-      <div v-if="activePanel" class="fixed inset-0 z-50 grid place-items-center bg-slate-950/35 p-4" @click.self="closePanel">
-        <Card class="max-h-[90vh] w-full max-w-3xl overflow-y-auto p-6">
-          <div class="flex items-center justify-between gap-4"><h2 class="text-xl font-semibold">{{ activePanel === 'contact' ? t('contactInformation') : activePanel === 'password' ? t('changePassword') : activePanel === 'portrait' ? t('managePortrait') : t('personalQuota') }}</h2><Button variant="ghost" size="icon" @click="closePanel"><X class="h-4 w-4" /></Button></div>
-          <form v-if="activePanel === 'contact'" class="mt-6 grid gap-5" @submit.prevent="saveContact"><label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('contactPhone') }} <span class="font-normal text-slate-400">{{ t('optional') }}</span><InternationalPhoneInput v-model="contactPhone" @valid="phoneValid = $event" /></label><label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('email') }} <span class="font-normal text-slate-400">{{ t('optional') }}</span><Input v-model="contactEmail" type="email" autocomplete="email" maxlength="320" /></label><Button class="w-fit" type="submit" :disabled="savingContact">{{ savingContact ? t('loading') : t('save') }}</Button></form>
+      <Dialog v-model:open="panelOpen" :title="activePanel === 'contact' ? t('contactInformation') : activePanel === 'password' ? t('changePassword') : activePanel === 'portrait' ? t('managePortrait') : t('personalQuota')">
+          <form v-if="activePanel === 'contact'" class="grid gap-5" @submit.prevent="saveContact"><ContactFields v-model="contacts" :required="Boolean(academicRole)" @valid="phoneValid = $event" /><p v-if="error" class="text-sm text-rose-700" role="alert">{{ error }}</p><Button class="w-fit" type="submit" :disabled="savingContact">{{ savingContact ? t('loading') : t('save') }}</Button></form>
           <form v-else-if="activePanel === 'password'" class="mt-6 grid gap-4" @submit.prevent="changePassword"><label class="grid gap-1.5 text-sm font-medium">{{ t('currentPassword') }}<Input v-model="currentPassword" type="password" autocomplete="current-password" required /></label><label class="grid gap-1.5 text-sm font-medium">{{ t('newPassword') }}<Input v-model="newPassword" type="password" minlength="12" autocomplete="new-password" required /></label><label class="grid gap-1.5 text-sm font-medium">{{ t('confirmPassword') }}<Input v-model="confirmation" type="password" minlength="12" autocomplete="new-password" required /></label><Button class="w-fit" type="submit" :disabled="changingPassword">{{ changingPassword ? t('loading') : t('changePassword') }}</Button></form>
           <div v-else-if="activePanel === 'portrait' && academicRole"><div v-if="loadingProfile" class="py-10 text-sm text-slate-500">{{ t('loading') }}</div><AcademicPortraitForm v-else-if="profile" class="mt-6" :role="academicRole" :initial-value="profile" :submitting="savingProfile" :submit-label="t('save')" @submit="saveProfile" /></div>
           <AiQuotaSummary v-else class="mt-6" />
-        </Card>
-      </div>
+      </Dialog>
     </div>
   </DashboardLayout>
 </template>

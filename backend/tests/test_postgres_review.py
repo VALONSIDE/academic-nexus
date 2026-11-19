@@ -31,6 +31,8 @@ def pg_engine():
     admin_engine = create_engine(_url)
     schema = "review_" + uuid.uuid4().hex
     with admin_engine.begin() as connection:
+        if {"tenants", "users", "alembic_version"} & set(inspect(connection).get_table_names(schema="public")):
+            pytest.fail("ACADEMICNEXUS_TEST_POSTGRES_URL must point to a dedicated, unmigrated test database.")
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public"))
         connection.execute(text(f'CREATE SCHEMA "{schema}"'))
     url = make_url(_url).update_query_dict({"options": f"-csearch_path={schema},public"})
@@ -63,6 +65,7 @@ def test_pgvector_ranking_persists_and_reuses_cache(pg_engine, monkeypatch):
     from pydantic import SecretStr
     from app.services import ranking, ranking_provider
     user_id, _ = seed(pg_engine)
+    monkeypatch.setattr(get_settings(), "ranking_enabled", True)
     monkeypatch.setattr(get_settings(), "siliconflow_api_key", SecretStr("test-key"))
     monkeypatch.setattr(ranking, "_blocked_until", 0)
     calls = []

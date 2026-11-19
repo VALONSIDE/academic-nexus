@@ -43,6 +43,8 @@ import type {
   UserSubscription,
 } from '@/types/auth'
 
+import type { WorkspaceNotification, SubscriptionInventory, SubscriptionHistoryEntry, ReminderCategory, AiActionCard } from '@/lib/workspace'
+
 const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
 export class ApiError extends Error {
@@ -104,14 +106,48 @@ export const authApi = {
   updateLocale(token: string, preferred_locale: User['preferred_locale']) {
     return request<User>('/auth/me/locale', { method: 'PATCH', body: JSON.stringify({ preferred_locale }) }, token)
   },
-  updateContact(token: string, contact: { phone: string; email: string }) {
+  updateContact(token: string, contact: { phone: string; email: string; wechat?: string; share_email?: boolean; share_phone?: boolean; share_wechat?: boolean }) {
     return request<User>('/auth/me/contact', { method: 'PATCH', body: JSON.stringify(contact) }, token)
   },
   changeOwnPassword(token: string, current_password: string, new_password: string) {
     return request<AuthResponse>('/auth/me/password', { method: 'POST', body: JSON.stringify({ current_password, new_password }) }, token)
   },
-  dashboard(token: string) {
-    return request<DashboardOverview>('/dashboard', {}, token)
+  logout(token: string) { return request<void>('/auth/logout', { method: 'POST' }, token) },
+  contact(token: string, userId: string) {
+    return request<import('@/lib/contacts').PublicContact>(`/contacts/${userId}`, {cache: 'no-store'}, token)
+  },
+  notifications(token: string, unreadOnly = false, limit = 15, offset = 0) {
+    return request<{items: WorkspaceNotification[]; unread: number; total: number}>(`/notifications?unread_only=${unreadOnly}&limit=${limit}&offset=${offset}`, {cache: 'no-store'}, token)
+  },
+  readNotification(token: string, id: string) {
+    return request<void>(`/notifications/${id}/read`, {method: 'POST'}, token)
+  },
+  readAllNotifications(token: string) {
+    return request<void>('/notifications/read-all', {method: 'POST'}, token)
+  },
+  institutionReminderRecipients(token: string, institution: string) {
+    return request<{id: string; name: string; username: string}[]>(`/admin/notifications/recipients?institution=${encodeURIComponent(institution)}`, {}, token)
+  },
+  sendInstitutionReminder(token: string, institution: string, recipient_id: string, category: ReminderCategory) {
+    return request<{id: string}>('/admin/notifications/reminders', {method: 'POST', body: JSON.stringify({institution, recipient_id, category})}, token)
+  },
+  subscriptionInventory(token: string, institution: string) {
+    return request<SubscriptionInventory[]>(`/admin/subscriptions/inventory/${encodeURIComponent(institution)}`, {}, token)
+  },
+  subscriptionHistory(token: string, institution: string, offset: number) {
+    return request<{items: SubscriptionHistoryEntry[]; more: boolean}>(`/admin/subscriptions/history/${encodeURIComponent(institution)}?offset=${offset}`, {}, token)
+  },
+  batchResourceQuotas(token: string, user_ids: string[], quota_mb: number) {
+    return request<{updated: number}>('/admin/resource-quotas/batch', {method: 'POST', body: JSON.stringify({user_ids, quota_mb})}, token)
+  },
+  studentSelectionSettings(token: string) {
+    return request<AdminSelectionUser>('/selection/student/settings', {}, token)
+  },
+  runAiAction(token: string, conversation: string, message: string) {
+    return request<AiActionCard>(`/ai/conversations/${conversation}/messages/${message}/action`, {method: 'POST'}, token)
+  },
+  dashboard(token: string, workspace?: string) {
+    return request<DashboardOverview>(workspace ? `/dashboard?workspace=${workspace}` : '/dashboard', {}, token)
   },
   async downloadTemplate(token: string) {
     return download('/admin/pre-registrations/template', { method: 'GET' }, token)
@@ -125,16 +161,19 @@ export const authApi = {
     const query = new URLSearchParams({ ...(options.role ? { role: options.role } : {}), ...(options.account_status ? { account_status: options.account_status } : {}), ...(options.search ? { search: options.search } : {}) })
     return request<PreRegistrationAccountListResponse>(`/admin/pre-registrations?${query.toString()}`, {}, token)
   },
+  reissuePreRegistrations(token: string, ids: string[]) {
+    return download('/admin/pre-registrations/reissue', { method: 'POST', body: JSON.stringify({ ids }) }, token)
+  },
   deletePreRegistration(token: string, preRegistrationId: string) {
     return request<void>(`/admin/pre-registrations/${preRegistrationId}`, { method: 'DELETE' }, token)
   },
   deletePreRegistrations(token: string, ids: string[]) {
     return request<void>('/admin/pre-registrations/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) }, token)
   },
-  completeStudentRegistration(token: string, payload: StudentAcademicProfile, contact: { phone: string; email: string }) {
+  completeStudentRegistration(token: string, payload: StudentAcademicProfile, contact: { phone: string; email: string; wechat?: string; share_email?: boolean; share_phone?: boolean; share_wechat?: boolean }) {
     return request<AuthResponse>('/profiles/student/complete-registration', { method: 'POST', body: JSON.stringify({ ...payload, ...contact }) }, token)
   },
-  completeMentorRegistration(token: string, payload: MentorAcademicProfile, contact: { phone: string; email: string }) {
+  completeMentorRegistration(token: string, payload: MentorAcademicProfile, contact: { phone: string; email: string; wechat?: string; share_email?: boolean; share_phone?: boolean; share_wechat?: boolean }) {
     return request<AuthResponse>('/profiles/mentor/complete-registration', { method: 'POST', body: JSON.stringify({ ...payload, ...contact }) }, token)
   },
   studentProfile(token: string) {
@@ -149,11 +188,11 @@ export const authApi = {
   updateMentorProfile(token: string, payload: MentorAcademicProfile) {
     return request<AcademicProfileResponse>('/profiles/mentor/me', { method: 'PUT', body: JSON.stringify(payload) }, token)
   },
-  mentorRecommendations(token: string) {
-    return request<MentorRecommendationListResponse>('/matching/mentors', {}, token)
+  mentorRecommendations(token: string, options = new URLSearchParams()) {
+    return request<MentorRecommendationListResponse>(`/matching/mentors?${options}`, {}, token)
   },
-  studentCandidates(token: string) {
-    return request<StudentCandidateListResponse>('/matching/students', {}, token)
+  studentCandidates(token: string, options = new URLSearchParams()) {
+    return request<StudentCandidateListResponse>(`/matching/students?${options}`, {}, token)
   },
   studentSelections(token: string) {
     return request<MentorSelection[]>('/selection/student/me', {}, token)
@@ -191,7 +230,7 @@ export const authApi = {
   adminSelectionUsers(token: string, role: 'student' | 'mentor') {
     return request<AdminSelectionUser[]>(`/admin/selection/users?role=${role}`, {}, token)
   },
-  updateAdminSelectionUser(token: string, userId: string, payload: { choice_limit?: number; capacity?: number; is_exempt?: boolean; selection_mode?: 'manual' | 'first_come'; use_default?: boolean }) {
+  updateAdminSelectionUser(token: string, userId: string, payload: { choice_limit?: number | null; capacity?: number | null; is_exempt?: boolean; selection_mode?: 'manual' | 'first_come'; use_default?: boolean }) {
     return request<AdminSelectionUser>(`/admin/selection/users/${userId}`, { method: 'PATCH', body: JSON.stringify(payload) }, token)
   },
   adminSelectionRecords(token: string, options: { selection_status?: string; search?: string } = {}) {
@@ -264,14 +303,18 @@ export const authApi = {
   aiConversation(token: string, conversationId: string) {
     return request<AiConversationDetail>(`/ai/conversations/${conversationId}`, {}, token)
   },
-  sendAiMessage(token: string, conversationId: string, content: string, options: { model_tier: AiModelTier; response_mode: AiResponseMode }) {
-    return request<AiChatResponse>(`/ai/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ content, ...options }) }, token)
+  aiProviders(token: string) {
+    return request<{default: string; items: {id: string; label: string; available: boolean}[]}>('/ai/providers', {}, token)
   },
-  async sendAiMessageStream(token: string, conversationId: string, content: string, model_tier: AiModelTier, onText: (text: string) => void): Promise<AiChatResponse> {
+  sendAiMessage(token: string, conversationId: string, content: string, options: { model_tier: AiModelTier; response_mode: AiResponseMode; provider?: string; contact_user_id?: string; contact_channel?: string; selection_target_id?: string }) {
+    return request<AiChatResponse>(`/ai/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ content, request_id: crypto.randomUUID(), ...options }) }, token)
+  },
+  async sendAiMessageStream(token: string, conversationId: string, content: string, model_tier: AiModelTier, onText: (text: string) => void, provider = 'deepseek', context: {contact_user_id?: string; contact_channel?: string; selection_target_id?: string} = {}, signal?: AbortSignal): Promise<AiChatResponse> {
     const response = await fetch(`${baseUrl}/ai/conversations/${conversationId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ content, model_tier, response_mode: 'stream' }),
+      body: JSON.stringify({ content, model_tier, provider, ...context, request_id: crypto.randomUUID(), response_mode: 'stream' }),
+      signal,
     })
     if (!response.ok) throw await responseError(response)
     if (!response.body) throw new ApiError('Streaming response body is unavailable')

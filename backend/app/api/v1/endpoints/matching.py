@@ -1,5 +1,8 @@
 """Role-specific, explainable mentor matching endpoints."""
 
+from typing import Annotated, Literal
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -23,12 +26,48 @@ def _factors(score) -> list[MatchFactorResponse]:
     return [MatchFactorResponse(code=item.code, score=item.score, shared_terms=item.shared_terms) for item in score.factors]
 
 
+SortMode = Literal["recommended", "college", "score", "name"]
+
+
+def _page(matches, own_profile, profile_name, search, college, order, candidate, limit, offset):
+    query = search.strip().casefold()
+    departments = sorted({getattr(user, profile_name).department for user, _ in matches
+                          if getattr(user, profile_name).department})
+    filtered = []
+    for user, score in matches:
+        profile = getattr(user, profile_name)
+        if candidate and user.id != candidate:
+            continue
+        if college and profile.department != college:
+            continue
+        terms = ((profile.research_directions or []) + (profile.representative_papers or [])
+                 if profile_name == "mentor_profile" else (profile.research_interests or []) + (profile.skills or []))
+        if query and query not in " ".join(filter(None, (
+            user.full_name, user.username, profile.university, profile.department, *terms
+        ))).casefold():
+            continue
+        filtered.append((user, score))
+    if order == "name":
+        filtered.sort(key=lambda pair: (pair[0].full_name.casefold(), pair[0].id))
+    elif order in {"college", "score"}:
+        filtered.sort(key=lambda pair: (
+            not (own_profile.department and getattr(pair[0], profile_name).department == own_profile.department)
+            if order == "college" else False,
+            -pair[1].score, pair[0].full_name.casefold(), pair[0].id,
+        ))
+    return filtered[offset:offset + limit] if limit is not None else filtered[offset:], len(filtered), departments
+
+
 @router.get("/mentors", response_model=MentorRecommendationListResponse, summary="Recommend mentors / 推荐导师")
 def recommend_mentors(
     db: DbSession,
     student: User = Depends(require_roles("student")),
     limit: int | None = Query(default=None, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    search: Annotated[str, Query(max_length=120)] = "",
+    college: Annotated[str | None, Query(max_length=160)] = None,
+    order: SortMode = "recommended",
+    candidate: UUID | None = None,
 ) -> MentorRecommendationListResponse:
     student = db.scalar(
         select(User).options(selectinload(User.student_profile)).where(User.id == student.id)
@@ -37,12 +76,13 @@ def recommend_mentors(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "portrait_required"})
     matches = mentor_recommendations(db, student)
     db.commit()
-    total = len(matches)
     mode = matches[0][1].ranking_mode if matches else "local"
-    matches = matches[offset:offset + limit] if limit is not None else matches[offset:]
+    matches, total, colleges = _page(matches, student.student_profile, "mentor_profile",
+                                      search, college, order, candidate, limit, offset)
     return MentorRecommendationListResponse(
         algorithm_version=ALGORITHM_VERSION,
         total=total,
+        colleges=colleges,
         ranking_mode=mode,
         items=[
             MatchedMentorResponse(
@@ -71,6 +111,10 @@ def recommend_students(
     mentor: User = Depends(require_roles("mentor")),
     limit: int | None = Query(default=None, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    search: Annotated[str, Query(max_length=120)] = "",
+    college: Annotated[str | None, Query(max_length=160)] = None,
+    order: SortMode = "recommended",
+    candidate: UUID | None = None,
 ) -> StudentCandidateListResponse:
     mentor = db.scalar(
         select(User).options(selectinload(User.mentor_profile)).where(User.id == mentor.id)
@@ -79,12 +123,13 @@ def recommend_students(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "portrait_required"})
     matches = student_candidates(db, mentor)
     db.commit()
-    total = len(matches)
     mode = matches[0][1].ranking_mode if matches else "local"
-    matches = matches[offset:offset + limit] if limit is not None else matches[offset:]
+    matches, total, colleges = _page(matches, mentor.mentor_profile, "student_profile",
+                                      search, college, order, candidate, limit, offset)
     return StudentCandidateListResponse(
         algorithm_version=ALGORITHM_VERSION,
         total=total,
+        colleges=colleges,
         ranking_mode=mode,
         items=[
             MatchedStudentResponse(

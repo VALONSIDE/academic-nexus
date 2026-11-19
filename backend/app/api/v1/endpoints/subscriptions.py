@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import DbSession, require_administrator, require_roles, require_super_admin
@@ -25,6 +25,8 @@ from app.schemas.subscriptions import (
     SubscriptionKeyActivateRequest,
     SubscriptionResponse,
 )
+from app.services.admin_scope import can_manage_institution
+from app.services.subscription_reporting import history, inventory
 from app.services.subscriptions import (
     SubscriptionError,
     active_premium_subscription_user_ids,
@@ -290,6 +292,7 @@ def create_subscription_key_batch(
         filename = f"academicnexus-subscription-keys-{payload.institution_abbr}-{payload.plan_code}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.xlsx"
         return StreamingResponse(
             BytesIO(build_subscription_key_receipt(issued)),
+            status_code=status.HTTP_201_CREATED,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
                 "Content-Disposition": f'attachment; filename="{filename}"',
@@ -370,9 +373,7 @@ def export_subscription_delivery_pdfs(
 ) -> StreamingResponse:
     try:
         bundle = build_subscription_delivery_pdf_bundle(db, admin, [DeliveryItem(raw_key=item.key, recipient_user_id=item.recipient_user_id) for item in payload.items])
-        # Export does not consume a Key or otherwise mutate state.  Release
-        # verification locks before streaming the in-memory archive.
-        db.rollback()
+        db.commit()
         filename = f"academicnexus-subscription-notices-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.zip"
         return StreamingResponse(
             BytesIO(bundle),
@@ -386,3 +387,20 @@ def export_subscription_delivery_pdfs(
     except SubscriptionError as error:
         db.rollback()
         _raise_subscription_error(error)
+
+
+@admin_router.get("/inventory/{institution}")
+def read_inventory(institution: str, db: DbSession, admin: User = Depends(require_administrator)):
+    institution = institution.strip().upper()
+    if not can_manage_institution(db, admin, institution):
+        raise HTTPException(403, detail={"code": "institution_scope_forbidden"})
+    return inventory(db, admin.tenant_id, institution)
+
+
+@admin_router.get("/history/{institution}")
+def read_history(institution: str, db: DbSession, admin: User = Depends(require_administrator),
+                 limit: int = Query(30, ge=1, le=100), offset: int = Query(0, ge=0)):
+    institution = institution.strip().upper()
+    if not can_manage_institution(db, admin, institution):
+        raise HTTPException(403, detail={"code": "institution_scope_forbidden"})
+    return history(db, admin.tenant_id, institution, limit, offset)

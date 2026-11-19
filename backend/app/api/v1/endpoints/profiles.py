@@ -99,6 +99,10 @@ def complete_student_registration(
     ensure_email_available(db, pending_user, payload.email)
     pending_user.phone = payload.phone
     pending_user.email = payload.email
+    pending_user.wechat = payload.wechat
+    pending_user.share_email = payload.share_email
+    pending_user.share_phone = payload.share_phone
+    pending_user.share_wechat = payload.share_wechat
     apply_student_profile(pending_user.student_profile, payload, complete=True)
     pending_user.is_active = True
     pending_user.is_verified = True
@@ -130,6 +134,10 @@ def complete_mentor_registration(
     ensure_email_available(db, pending_user, payload.email)
     pending_user.phone = payload.phone
     pending_user.email = payload.email
+    pending_user.wechat = payload.wechat
+    pending_user.share_email = payload.share_email
+    pending_user.share_phone = payload.share_phone
+    pending_user.share_wechat = payload.share_wechat
     apply_mentor_profile(pending_user.mentor_profile, payload, complete=True)
     pending_user.is_active = True
     pending_user.is_verified = True

@@ -187,6 +187,8 @@ def resolve_delivery_items(
     return resolved
 
 
+from app.services.workspace_events import record, notify_school_admins
+
 def activate_subscription_delivery_items(db: Session, admin: User, items: list[DeliveryItem]):
     resolved = resolve_delivery_items(db, admin, items, require_unsubscribed_recipient=True)
     snapshots = []
@@ -195,6 +197,12 @@ def activate_subscription_delivery_items(db: Session, admin: User, items: list[D
         if item.recipient is None:
             raise SubscriptionError("subscription_delivery_recipient_required")
         snapshots.append(_activate_locked_subscription_key(db, item.recipient, item.key, started_at=now))
+    for institution in {item.key.institution_abbr for item in resolved}:
+        quantity = sum(item.key.institution_abbr == institution for item in resolved)
+        record(db, admin.tenant_id, "subscription_delivered", actor_id=admin.id,
+               institution=institution, quantity=quantity)
+        notify_school_admins(db, admin.tenant_id, institution, "subscription_delivered",
+                             actor_id=admin.id, quantity=quantity)
     db.commit()
     return snapshots
 
@@ -225,6 +233,8 @@ def build_subscription_delivery_pdf_bundle(db: Session, admin: User, items: list
             filename_seed = "GENERAL" if item.recipient is None else item.recipient.username or str(index)
             safe_username = "".join(character for character in filename_seed if character.isalnum() or character in "_-")[:64]
             archive.writestr(f"AcademicNexus-Subscription-Notice-{index:03d}-{safe_username or index}.pdf", pdf)
-    # No database mutation in export mode; locks are released when the request
-    # session ends and keys remain redeemable by the intended recipient.
+    for institution in {item.key.institution_abbr for item in resolved}:
+        quantity = sum(item.key.institution_abbr == institution for item in resolved)
+        record(db, admin.tenant_id, "subscription_exported", actor_id=admin.id,
+               institution=institution, quantity=quantity)
     return bundle.getvalue()

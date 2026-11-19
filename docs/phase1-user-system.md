@@ -36,16 +36,18 @@ Migration: `backend/alembic/versions/20260821_0001_phase1_user_system.py`.
 | `POST` | `/api/v1/admin/pre-registrations/import` | Admin | 导入已填写的模板并直接下载 Excel 回执。 |
 | `GET` | `/api/v1/health` | Public / 公开 | 服务健康检查。 |
 
-Example activation body / 激活请求示例:
+Activation request structure / 激活请求结构。请用回执中的实际字段和你自己设置的密码替换占位符。
 
 ```json
 {
-  "username": "CUC_S20240001",
-  "full_name": "张同学",
-  "academic_id": "20240001",
-  "access_key": "1234-ABCD-5678-9012",
-  "password": "AcademicNexus2026",
-  "preferred_locale": "zh-CN"
+  "username": "<account name from the receipt>",
+  "full_name": "<full name from the receipt>",
+  "academic_id": "<academic ID from the receipt>",
+  "access_key": "<Access Key from the receipt>",
+  "password": "<your new password>",
+  "preferred_locale": "zh-CN",
+  "terms_accepted": true,
+  "privacy_accepted": true
 }
 ```
 

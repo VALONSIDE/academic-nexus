@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DbSession, require_roles, require_super_admin
+from app.api.deps import CurrentUser, DbSession, require_roles, require_super_admin
 from app.models.ai import AiConversation, AiMessage
 from app.models.user import User
 from app.schemas.ai import (
@@ -25,6 +25,7 @@ from app.schemas.ai import (
     AiMessageResponse,
     AiQuotaResponse,
 )
+from app.services.ai.selection_cards import execute_card
 from app.services.ai.assistant import AiAssistantError, create_conversation, delete_conversation, get_conversation, list_conversations, list_messages, rename_conversation, send_message, stream_message
 from app.services.ai.quota import AiQuotaExceededError, QuotaSnapshot, quota_snapshot, update_user_quota
 
@@ -51,7 +52,7 @@ def _quota_response(snapshot: QuotaSnapshot) -> AiQuotaResponse:
 
 
 def _message_response(message: AiMessage) -> AiMessageResponse:
-    return AiMessageResponse(id=message.id, role=message.role, content=message.content, created_at=message.created_at)
+    return AiMessageResponse(id=message.id, role=message.role, content=message.content, action_card=message.action_card, created_at=message.created_at)
 
 
 def _conversation_response(conversation: AiConversation) -> AiConversationResponse:
@@ -70,6 +71,8 @@ def _raise_assistant_error(error: AiAssistantError | AiQuotaExceededError) -> No
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={"code": error.code},
         ) from error
+    if error.code in {"request_id_conflict", "request_in_progress", "request_failed_use_new_id"}:
+        raise HTTPException(status_code=409, detail={"code": error.code}) from error
     if error.code == "provider_not_configured":
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": error.code}) from error
     raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail={"code": error.code}) from error
@@ -153,6 +156,8 @@ def send_ai_message(
     conversation = get_conversation(db, current_user, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found / 未找到会话")
+    from app.services.contacts import draft_context
+    draft_context(db, current_user, payload.contact_user_id, payload.contact_channel)
     if payload.response_mode == "stream":
         def event_stream() -> Iterator[str]:
             try:
@@ -162,6 +167,11 @@ def send_ai_message(
                     conversation,
                     content=payload.content,
                     model_tier=payload.model_tier,
+                    provider=payload.provider,
+                    request_id=payload.request_id,
+                    contact_user_id=payload.contact_user_id,
+                    contact_channel=payload.contact_channel,
+                    selection_target_id=payload.selection_target_id,
                 )) as events:
                     for event in events:
                         if event.text:
@@ -191,6 +201,11 @@ def send_ai_message(
             conversation,
             content=payload.content,
             model_tier=payload.model_tier,
+                    provider=payload.provider,
+                    request_id=payload.request_id,
+                    contact_user_id=payload.contact_user_id,
+                    contact_channel=payload.contact_channel,
+                    selection_target_id=payload.selection_target_id,
         )
     except (AiAssistantError, AiQuotaExceededError) as error:
         _raise_assistant_error(error)
@@ -286,3 +301,24 @@ def update_ai_quota(
     except AiQuotaExceededError as error:
         _raise_assistant_error(error)
     return _quota_response(snapshot)
+
+
+@router.get("/providers", summary="Available AI providers / 可用 AI 服务")
+def available_providers(_user: CurrentUser) -> dict:
+    from app.core.config import get_settings
+    settings = get_settings()
+    result = []
+    for code, label in (("deepseek", "DeepSeek"), ("minimax", "MiniMax"), ("openai", "OpenAI"), ("qwen", "通义千问 / Qwen")):
+        secret = getattr(settings, f"{code}_api_key")
+        key = secret.get_secret_value() if hasattr(secret, "get_secret_value") else secret
+        result.append({"id": code, "label": label, "available": bool(key.strip())})
+    return {"default": "deepseek", "items": result}
+
+
+@router.post("/conversations/{conversation_id}/messages/{message_id}/action")
+def run_action_card(conversation_id: UUID, message_id: UUID, db: DbSession,
+                    current_user: User = Depends(require_roles("student", "mentor"))):
+    conversation = get_conversation(db, current_user, conversation_id)
+    if conversation is None:
+        raise HTTPException(404, detail={"code": "conversation_not_found"})
+    return execute_card(db, current_user, conversation, message_id)

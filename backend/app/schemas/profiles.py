@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.auth import Locale, UserResponse, normalize_email, normalize_phone, validate_password_strength
+from app.schemas.auth import Locale, UserResponse, normalize_email, normalize_phone, validate_password_strength, required_email, required_wechat, normalize_wechat
 
 
 def _normalize_tags(values: list[str]) -> list[str]:
@@ -68,7 +68,12 @@ class MentorAcademicProfilePayload(BaseModel):
 
 class StudentRegistrationCompleteRequest(StudentAcademicProfilePayload):
     phone: str | None = Field(default=None, max_length=32)
-    email: str | None = Field(default=None, max_length=320)
+    email: str = Field(min_length=1, max_length=320)
+    wechat: str = Field(min_length=3, max_length=64)
+    share_email: bool = False
+    share_phone: bool = False
+    share_wechat: bool = False
+    _validate_required_wechat = field_validator("wechat")(required_wechat)
 
     @field_validator("phone")
     @classmethod
@@ -78,12 +83,17 @@ class StudentRegistrationCompleteRequest(StudentAcademicProfilePayload):
     @field_validator("email")
     @classmethod
     def validate_email(cls, email: str | None) -> str | None:
-        return normalize_email(email)
+        return required_email(email)
 
 
 class MentorRegistrationCompleteRequest(MentorAcademicProfilePayload):
     phone: str | None = Field(default=None, max_length=32)
-    email: str | None = Field(default=None, max_length=320)
+    email: str = Field(min_length=1, max_length=320)
+    wechat: str = Field(min_length=3, max_length=64)
+    share_email: bool = False
+    share_phone: bool = False
+    share_wechat: bool = False
+    _validate_required_wechat = field_validator("wechat")(required_wechat)
 
     @field_validator("phone")
     @classmethod
@@ -93,7 +103,7 @@ class MentorRegistrationCompleteRequest(MentorAcademicProfilePayload):
     @field_validator("email")
     @classmethod
     def validate_email(cls, email: str | None) -> str | None:
-        return normalize_email(email)
+        return required_email(email)
 
 
 class AcademicProfileResponse(BaseModel):
@@ -114,6 +124,8 @@ class ManagedUserResponse(UserResponse):
 
 
 class AdminUserUpdateRequest(BaseModel):
+    wechat: str | None = Field(default=None, max_length=64)
+    _normalize_wechat = field_validator("wechat")(normalize_wechat)
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
     phone: str | None = Field(default=None, max_length=32)
     email: str | None = Field(default=None, max_length=320)

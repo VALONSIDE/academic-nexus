@@ -5,6 +5,7 @@
 .env.*
 !.env.example
 !.env.*.example
+.envrc
 .secrets/
 secrets/
 *.pem
@@ -35,6 +36,10 @@ blob-report/
 *.sqlite3
 *.db
 *.bak
+*.dump
+*.backup
+*.sql.gz
+*.log
 
 # -----------------------------------------------------------------------------
 # Import/export files / 预注册导入、回执与临时表格
@@ -48,17 +53,21 @@ academicnexus-*.xls
 *-export-*.xlsx
 *-export-*.xls
 *.csv
+*.pdf
+*.zip
+*.7z
+*.tar
+*.tar.gz
 
 # -----------------------------------------------------------------------------
 # Private project materials / 私有策划材料与旧项目
 # -----------------------------------------------------------------------------
 OLD_TSS_docker_oneclick/
-/智导未来_国创赛商业计划书_合并终稿5_格式调整版_最新实机图版(2).pdf
-/智导未来——AI驱动的学术发展与教学互动平台.pdf
 /MiniMax文档.md
 
 # Local handover notes / 本机交接文档（不得提交）
 /handover/
+/.kilo/
 
 # -----------------------------------------------------------------------------
 # Python / Python 运行产物

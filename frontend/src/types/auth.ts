@@ -7,6 +7,10 @@ export interface User {
   full_name: string
   phone: string | null
   email: string | null
+  wechat?: string | null
+  share_email?: boolean
+  share_phone?: boolean
+  share_wechat?: boolean
   preferred_locale: Locale
   is_active: boolean
   roles: Role[]
@@ -97,6 +101,7 @@ export interface PreRegistrationAccountListResponse {
 }
 
 export interface AdminUserUpdatePayload {
+  wechat?: string
   full_name?: string
   phone?: string
   email?: string
@@ -126,6 +131,7 @@ export interface AiQuota {
 }
 
 export interface AiMessage {
+  action_card?: import('@/lib/workspace').AiActionCard | null
   id: string
   role: 'user' | 'assistant'
   content: string
@@ -275,6 +281,7 @@ export interface MatchedStudent {
 }
 
 export interface MentorRecommendationListResponse {
+  colleges?: string[]
   algorithm_version: string
   ranking_mode: 'local' | 'semantic' | 'hybrid'
   total: number
@@ -282,6 +289,7 @@ export interface MentorRecommendationListResponse {
 }
 
 export interface StudentCandidateListResponse {
+  colleges?: string[]
   algorithm_version: string
   ranking_mode: 'local' | 'semantic' | 'hybrid'
   total: number
@@ -379,7 +387,7 @@ export interface MentorSelectionSettings {
   selection_mode: SelectionMode
   confirmed_count: number
   invitation_count: number
-  available_slots: number
+  available_slots: number | null
 }
 
 export interface SelectionCandidate {
@@ -406,6 +414,11 @@ export interface SelectionSettings {
 }
 
 export interface AdminSelectionUser {
+  default_limit: number
+  effective_limit: number
+  pending_count: number
+  confirmed_count: number
+  available: number | null
   user_id: string
   username: string
   full_name: string

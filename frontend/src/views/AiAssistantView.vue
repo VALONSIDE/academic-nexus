@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { BotMessageSquare, Check, CircleGauge, Pencil, Plus, Radio, Save, Send, Sparkles, Trash2, Zap, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -10,6 +10,11 @@ import ErrorDialog from '@/components/ErrorDialog.vue'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Select } from '@/components/ui/select'
+import ToggleGroup from '@/components/ui/toggle-group/ToggleGroup.vue'
+import Textarea from '@/components/ui/textarea/Textarea.vue'
+import AiSelectionCard from '@/components/AiSelectionCard.vue'
+import ContactActions from '@/components/ContactActions.vue'
+import type { PublicContact, ContactChannel } from '@/lib/contacts'
 import { renderMarkdown } from '@/lib/markdown'
 import { useAuthStore } from '@/stores/auth'
 import type { AiConversation, AiConversationDetail, AiMessage, AiModelTier, AiQuota, AiResponseMode, AiTopic } from '@/types/auth'
@@ -23,7 +28,28 @@ const activeConversation = ref<AiConversationDetail | null>(null)
 const quota = ref<AiQuota | null>(null)
 const composer = ref('')
 const newConversationTopic = ref<AiTopic>('academic_planning')
+const selectedProvider = ref(window.localStorage.getItem('academicnexus.ai-provider') || 'deepseek')
+const providers = ref<{id: string; label: string; available: boolean}[]>([])
+onMounted(async () => {
+  if (!auth.state.token) return
+  try { const result = await authApi.aiProviders(auth.state.token); providers.value = result.items; selectedProvider.value = result.items.find(p => p.id === selectedProvider.value && p.available)?.id || result.items.find(p => p.id === result.default && p.available)?.id || result.items.find(p => p.available)?.id || result.default } catch { error.value = t('updateFailed') }
+})
 const selectedModelTier = ref<AiModelTier>('standard')
+watch(selectedProvider, value => window.localStorage.setItem('academicnexus.ai-provider', value))
+const selectedContact = ref<PublicContact | null>(null)
+const selectionTargetId = ref<string>()
+const selectedChannel = ref<ContactChannel | null>(null)
+const copyNotice = ref('')
+let requestController: AbortController | null = null
+function stopGeneration() { requestController?.abort() }
+onUnmounted(() => requestController?.abort())
+const latestAnswer = computed(() => [...(activeConversation.value?.messages || [])].reverse().find(m => m.role === 'assistant')?.content || '')
+async function copyAnswer(text: string) {
+  try { await navigator.clipboard.writeText(text); copyNotice.value = t('copied') } catch { copyNotice.value = t('copyFailed') }
+}
+function composerKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !event.ctrlKey && !event.altKey && !event.metaKey) {event.preventDefault(); void send()}
+}
 const responseMode = ref<AiResponseMode>('stream')
 const loading = ref(false)
 const sending = ref(false)
@@ -61,6 +87,9 @@ function errorMessage(exception: unknown): string {
   if (exception.code === 'user_daily_limit_reached') return t('aiUserLimitReached')
   if (exception.code === 'project_daily_limit_reached') return t('aiProjectLimitReached')
   if (exception.code === 'credit_balance_exhausted') return t('aiBalanceExhausted')
+  if (exception.code === 'provider_insufficient_balance') return t('aiProviderBalance')
+  if (exception.code === 'contact_hidden') return t('contactHiddenError')
+  if (exception.code === 'contact_not_found') return t('contactUnavailable')
   if (exception.code === 'provider_not_configured') return t('aiUnavailable')
   return t('aiRequestFailed')
 }
@@ -72,6 +101,8 @@ function quotaExceeded(exception: unknown): boolean {
     'credit_balance_exhausted',
   ].includes(exception.code || '')
 }
+
+function topicLabel(topic: string) { return topics.value.find(item => item.value === topic)?.label || topic }
 
 function displayConversationTitle(title: string): string {
   return title === DEFAULT_CONVERSATION_TITLE ? t('newConversation') : title
@@ -109,8 +140,18 @@ async function loadWorkspace() {
     conversations.value = loadedConversations
     const requestedTopic = route.query.topic
     const candidate = route.query.candidate
-    if (requestedTopic === 'selection_advisor') {
+    if (typeof route.query.contact === 'string' && ['email', 'sms', 'wechat'].includes(String(route.query.channel))) {
+      const contact = await authApi.contact(auth.state.token, route.query.contact)
+      const channel = String(route.query.channel) as ContactChannel
+      if (!contact[channel === 'sms' ? 'phone' : channel]) throw new ApiError('Contact hidden', [], 'contact_hidden')
+      await createConversation('mentor_consultation')
+      selectedContact.value = contact
+      selectedChannel.value = channel
+      composer.value = t('draftContactPrompt', {name: contact.full_name, channel: t(`${channel}Channel`)})
+      await router.replace({query: {}})
+    } else if (requestedTopic === 'selection_advisor') {
       await createConversation('selection_advisor')
+      if (typeof route.query.target === 'string') selectionTargetId.value = route.query.target
       if (typeof candidate === 'string' && candidate.trim()) composer.value = t('selectionAdvisorPrompt', { name: candidate })
       await router.replace({ query: {} })
     } else if (loadedConversations[0]) await selectConversation(loadedConversations[0].id)
@@ -126,6 +167,9 @@ async function selectConversation(conversationId: string) {
   error.value = ''
   errorDetails.value = []
   renaming.value = false
+  selectedContact.value = null
+  selectionTargetId.value = undefined
+  selectedChannel.value = null
   try {
     activeConversation.value = await authApi.aiConversation(auth.state.token, conversationId)
     await scrollToBottom()
@@ -254,6 +298,8 @@ async function send() {
   composer.value = ''
   streamedReply.value = ''
   sending.value = true
+  requestController = new AbortController()
+  const contactContext = {selection_target_id: selectionTargetId.value, ...(selectedContact.value && selectedChannel.value ? {contact_user_id: selectedContact.value.user_id, contact_channel: selectedChannel.value} : {})}
   error.value = ''
   errorDetails.value = []
   await scrollToBottom()
@@ -262,9 +308,10 @@ async function send() {
       ? await authApi.sendAiMessageStream(auth.state.token, conversation.id, content, selectedModelTier.value, (text) => {
         streamedReply.value += text
         void scrollToBottom()
-      })
-      : await authApi.sendAiMessage(auth.state.token, conversation.id, content, { model_tier: selectedModelTier.value, response_mode: 'standard' })
+      }, selectedProvider.value, contactContext, requestController.signal)
+      : await authApi.sendAiMessage(auth.state.token, conversation.id, content, { model_tier: selectedModelTier.value, response_mode: 'standard', provider: selectedProvider.value, ...contactContext })
     replaceOptimisticMessage(optimisticId, [result.user_message, result.assistant_message])
+    selectionTargetId.value = undefined
     quota.value = result.quota
     const item = conversations.value.find(candidate => candidate.id === conversation.id)
     if (conversation.title === DEFAULT_CONVERSATION_TITLE) conversation.title = content.slice(0, 80)
@@ -278,13 +325,14 @@ async function send() {
     if (!recovered) {
       conversation.messages = conversation.messages.filter(message => message.id !== optimisticId)
       composer.value = content
-      error.value = errorMessage(exception)
+      error.value = exception instanceof DOMException && exception.name === 'AbortError' ? t('generationStopped') : errorMessage(exception)
       if (quotaExceeded(exception)) errorDetails.value = [error.value]
       await refreshQuotaSafely()
     }
   } finally {
     streamedReply.value = ''
     sending.value = false
+    requestController = null
   }
 }
 
@@ -308,7 +356,7 @@ onMounted(loadWorkspace)
           </form>
           <div v-if="conversations.length" class="mt-5 space-y-1">
             <div v-for="conversation in conversations" :key="conversation.id" class="group relative">
-              <button type="button" class="w-full rounded-xl px-3 py-2.5 pr-20 text-left text-sm transition" :class="activeConversation?.id === conversation.id ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-200/70'" @click="selectConversation(conversation.id)"><span class="block truncate font-medium">{{ displayConversationTitle(conversation.title) }}</span><span class="mt-1 flex items-center gap-1 truncate text-xs opacity-70"><span class="truncate">{{ t(conversation.topic) }}</span><span aria-hidden="true">·</span><time :datetime="conversation.last_message_at || conversation.created_at">{{ formatConversationDate(conversation.last_message_at || conversation.created_at) }}</time></span></button>
+              <button type="button" class="w-full rounded-xl px-3 py-2.5 pr-20 text-left text-sm transition" :class="activeConversation?.id === conversation.id ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-200/70'" @click="selectConversation(conversation.id)"><span class="block truncate font-medium">{{ displayConversationTitle(conversation.title) }}</span><span class="mt-1 flex items-center gap-1 truncate text-xs opacity-70"><span class="truncate">{{ topicLabel(conversation.topic) }}</span><span aria-hidden="true">·</span><time :datetime="conversation.last_message_at || conversation.created_at">{{ formatConversationDate(conversation.last_message_at || conversation.created_at) }}</time></span></button>
               <div class="absolute right-2 top-1/2 flex -translate-y-1/2 translate-x-1 gap-1 opacity-0 transition duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100">
                 <button v-if="conversation.last_message_at" type="button" class="grid h-7 w-7 place-items-center rounded-md bg-slate-950 text-white shadow-sm transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500" :aria-label="t('renameConversation')" :title="t('renameConversation')" @click.stop="startRenaming(conversation.id)"><Pencil class="h-3.5 w-3.5" /></button>
                 <button type="button" class="grid h-7 w-7 place-items-center rounded-md bg-rose-600 text-white shadow-sm transition hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-60" :disabled="sending || deletingConversation" :aria-label="t('deleteConversation')" :title="t('deleteConversation')" @click.stop="deleteConversation(conversation.id)"><Trash2 class="h-3.5 w-3.5" /></button>
@@ -319,9 +367,12 @@ onMounted(loadWorkspace)
 
         <section class="flex min-h-0 flex-col">
           <template v-if="activeConversation">
-            <header class="flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-100 px-5 py-3 sm:px-6"><span class="grid h-9 w-9 place-items-center rounded-xl bg-sky-100 text-sky-700"><BotMessageSquare class="h-5 w-5" /></span><div class="min-w-0 flex-1"><template v-if="renaming"><label class="sr-only" for="conversation-title">{{ t('conversationName') }}</label><input id="conversation-title" v-model="renameTitle" class="h-9 w-full max-w-md rounded-lg border border-slate-300 px-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100" type="text" maxlength="160" :aria-label="t('conversationName')" @keydown.enter.prevent="saveConversationTitle" @keydown.esc.prevent="cancelRenaming" /></template><h2 v-else class="truncate font-semibold text-slate-900">{{ displayConversationTitle(activeConversation.title) }}</h2><p class="text-xs text-slate-500">{{ t(activeConversation.topic) }} · {{ t('conversationStartedOn', { date: formatConversationDate(activeConversation.created_at) }) }}</p></div><div v-if="renaming" class="ml-auto flex items-center gap-2"><Button type="button" size="sm" :disabled="savingTitle || !renameTitle.trim()" @click="saveConversationTitle"><Save class="mr-1.5 h-3.5 w-3.5" />{{ t('save') }}</Button><Button type="button" variant="outline" size="sm" :disabled="savingTitle" :aria-label="t('cancel')" @click="cancelRenaming"><X class="h-3.5 w-3.5" /></Button></div></header>
-            <div ref="messagesPane" class="min-h-0 flex-1 space-y-5 overflow-y-auto bg-gradient-to-b from-white to-slate-50/60 px-5 py-5 sm:px-8"><article v-for="message in activeConversation.messages" :key="message.id" class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'"><div class="max-w-[85%]"><div class="markdown-content rounded-2xl px-4 py-3 text-sm leading-7 shadow-sm" :class="message.role === 'user' ? 'rounded-br-md bg-slate-900 text-white' : 'rounded-bl-md border border-slate-200 bg-white text-slate-800'" v-html="renderMarkdown(message.content)" /><time class="mt-1 block text-xs text-slate-400" :class="message.role === 'user' ? 'text-right' : 'text-left'" :datetime="message.created_at">{{ formatMessageTimestamp(message.created_at) }}</time></div></article><article v-if="sending" class="flex justify-start"><div class="max-w-[85%] rounded-2xl rounded-bl-md border border-sky-100 bg-sky-50 px-4 py-3 text-sm leading-7 text-slate-700 shadow-sm"><div v-if="streamedReply" class="markdown-content" v-html="renderMarkdown(streamedReply)" /><div v-else class="flex items-center gap-2"><Sparkles class="h-4 w-4 animate-pulse text-sky-600" />{{ t('aiThinking') }}</div></div></article><div v-if="!activeConversation.messages.length && !sending" class="grid h-full min-h-48 place-items-center"><span class="grid h-11 w-11 place-items-center rounded-2xl bg-sky-100 text-sky-700"><BotMessageSquare class="h-5 w-5" /></span></div></div>
-            <form class="shrink-0 border-t border-slate-200 bg-white p-3 sm:p-4" @submit.prevent="send"><div class="rounded-2xl border border-slate-200 bg-slate-50 p-2 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-100"><div class="flex items-end gap-3"><textarea v-model="composer" class="min-h-12 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none" :placeholder="t('messagePlaceholder')" :disabled="sending" @keydown.enter.exact.prevent="send" /><Button type="submit" size="sm" :disabled="sending || !composer.trim()"><Send class="mr-1.5 h-3.5 w-3.5" />{{ t('sendMessage') }}</Button></div><div class="mt-2 flex flex-col gap-2 border-t border-slate-200 pt-2 xl:flex-row xl:items-center xl:justify-between"><div class="flex flex-wrap gap-1.5" :aria-label="t('aiModelDepth')"><button v-for="model in modelTiers" :key="model.value" type="button" class="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs transition" :class="selectedModelTier === model.value ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'" :title="model.description" :aria-pressed="selectedModelTier === model.value" @click="selectedModelTier = model.value"><component :is="model.icon" class="h-3.5 w-3.5" />{{ model.label }} · {{ t('aiCredits', { count: model.cost }) }}</button></div><div class="flex rounded-lg bg-white p-1 ring-1 ring-slate-200" :aria-label="t('aiResponseMode')"><button v-for="mode in responseModes" :key="mode.value" type="button" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition" :class="responseMode === mode.value ? 'bg-slate-100 text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" :aria-pressed="responseMode === mode.value" @click="responseMode = mode.value"><component :is="mode.icon" class="h-3.5 w-3.5" />{{ mode.label }}</button></div></div></div><p class="mt-2 text-xs leading-5 text-slate-500">{{ t('aiModelCostNote') }}</p></form>
+            <header class="flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-100 px-5 py-3 sm:px-6"><span class="grid h-9 w-9 place-items-center rounded-xl bg-sky-100 text-sky-700"><BotMessageSquare class="h-5 w-5" /></span><div class="min-w-0 flex-1"><template v-if="renaming"><label class="sr-only" for="conversation-title">{{ t('conversationName') }}</label><input id="conversation-title" v-model="renameTitle" class="h-9 w-full max-w-md rounded-lg border border-slate-300 px-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100" type="text" maxlength="160" :aria-label="t('conversationName')" @keydown.enter.prevent="saveConversationTitle" @keydown.esc.prevent="cancelRenaming" /></template><h2 v-else class="truncate font-semibold text-slate-900">{{ displayConversationTitle(activeConversation.title) }}</h2><p class="text-xs text-slate-500">{{ topicLabel(activeConversation.topic) }} · {{ t('conversationStartedOn', { date: formatConversationDate(activeConversation.created_at) }) }}</p></div><div v-if="renaming" class="ml-auto flex items-center gap-2"><Button type="button" size="sm" :disabled="savingTitle || !renameTitle.trim()" @click="saveConversationTitle"><Save class="mr-1.5 h-3.5 w-3.5" />{{ t('save') }}</Button><Button type="button" variant="outline" size="sm" :disabled="savingTitle" :aria-label="t('cancel')" @click="cancelRenaming"><X class="h-3.5 w-3.5" /></Button></div></header>
+            <div ref="messagesPane" class="min-h-0 flex-1 space-y-5 overflow-y-auto bg-gradient-to-b from-white to-slate-50/60 px-5 py-5 sm:px-8">            <div v-if="selectedContact" class="mb-5"><ContactActions :user-id="selectedContact.user_id" :draft="latestAnswer" /><Button size="sm" variant="ghost" :disabled="sending" @click="selectedContact = null; selectedChannel = null">{{ t('clearContact') }}</Button></div><article v-for="message in activeConversation.messages" :key="message.id" class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'"><div class="max-w-[85%]"><p v-if="message.role === 'assistant'" class="mb-1 text-xs font-medium text-slate-600">{{ t('aiGenerated') }}</p><div class="markdown-content rounded-2xl px-4 py-3 text-sm leading-7 shadow-sm" :class="message.role === 'user' ? 'rounded-br-md bg-slate-900 text-white' : 'rounded-bl-md border border-slate-200 bg-white text-slate-800'" v-html="renderMarkdown(message.content)" /><time class="mt-1 block text-xs text-slate-400" :class="message.role === 'user' ? 'text-right' : 'text-left'" :datetime="message.created_at">{{ formatMessageTimestamp(message.created_at) }}</time><AiSelectionCard v-if="message.action_card" :card="message.action_card" :conversation-id="activeConversation.id" :message-id="message.id" :workspace="route.meta.role === 'mentor' ? 'mentor' : 'student'" @completed="message.action_card = $event" /><Button v-if="message.role === 'assistant'" size="sm" variant="ghost" type="button" @click="copyAnswer(message.content)">{{ t('copyAnswer') }}</Button></div></article><article v-if="sending" class="flex justify-start"><div class="max-w-[85%] rounded-2xl rounded-bl-md border border-sky-100 bg-sky-50 px-4 py-3 text-sm leading-7 text-slate-700 shadow-sm"><div v-if="streamedReply"><p class="mb-1 text-xs font-medium text-slate-600">{{ t('aiGenerated') }}</p><div class="markdown-content" v-html="renderMarkdown(streamedReply)" /></div><div v-else class="flex items-center gap-2"><Sparkles class="h-4 w-4 animate-pulse text-sky-600" />{{ t('aiThinking') }}</div></div></article><div v-if="!activeConversation.messages.length && !sending" class="grid place-items-center py-4"><span class="grid h-11 w-11 place-items-center rounded-2xl bg-sky-100 text-sky-700"><BotMessageSquare class="h-5 w-5" /></span></div></div>
+
+            <div v-if="!activeConversation.messages.length && !selectedContact" class="flex shrink-0 flex-wrap gap-2 px-4 pb-3"><Button v-for="key in ['aiQuickPlan','aiQuickReview','aiQuickCompare']" :key="key" size="sm" variant="outline" @click="composer = t(key)">{{ t(({aiQuickPlan: 'academicPlanning', aiQuickReview: 'learningRoadmap', aiQuickCompare: 'selectionAdvisor'} as Record<string,string>)[key] || key) }}</Button></div>
+            <p v-if="copyNotice" class="px-4 py-1 text-xs text-sky-800" role="status">{{ copyNotice }}</p>
+            <form class="shrink-0 border-t border-slate-200 bg-white p-3 sm:p-4" @submit.prevent="send"><div class="rounded-2xl border border-slate-200 bg-slate-50 p-2 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-100"><div class="flex items-end gap-3"><Textarea v-model="composer" class="flex-1 resize-y" :aria-label="t('messagePlaceholder')" :placeholder="t('messagePlaceholder')" :disabled="sending" @keydown="composerKeydown" /><Button v-if="sending && responseMode === 'stream'" type="button" variant="outline" @click="stopGeneration">{{ t('stopGeneration') }}</Button><Button type="submit" :disabled="sending || !composer.trim() || !providers.some(p => p.id === selectedProvider && p.available)"><Send class="mr-1.5 h-3.5 w-3.5" />{{ t('sendMessage') }}</Button></div><div class="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3"><div class="w-full sm:w-44"><Select v-model="selectedProvider" :disabled="sending" :options="providers.map(p => ({value: p.id, label: p.label + (p.available ? '' : ` (${t('unavailable')})`), disabled: !p.available}))" :aria-label="t('aiProvider')" /></div><ToggleGroup v-model="selectedModelTier" :disabled="sending" :label="t('aiModelDepth')" :options="modelTiers.map(m => ({value: m.value, label: `${m.label} · ${m.cost}`}))" /><ToggleGroup v-model="responseMode" :disabled="sending" :label="t('aiResponseMode')" :options="responseModes" /></div></div><p class="mt-2 text-xs leading-5 text-slate-500">{{ t('aiModelCostNote') }}</p></form>
           </template>
           <div v-else class="grid min-h-0 flex-1 place-items-center px-6 text-center"><div><span class="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-sky-100 text-sky-700"><BotMessageSquare class="h-6 w-6" /></span><p class="mt-4 max-w-sm text-sm leading-6 text-slate-600">{{ loading ? t('loading') : t('selectConversation') }}</p></div></div>
         </section>

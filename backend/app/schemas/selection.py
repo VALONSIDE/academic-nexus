@@ -43,7 +43,7 @@ class MentorSelectionSettingsResponse(BaseModel):
     selection_mode: SelectionMode
     confirmed_count: int
     invitation_count: int
-    available_slots: int
+    available_slots: int | None
 
 
 class MentorSelectionSettingsUpdate(BaseModel):
@@ -52,6 +52,11 @@ class MentorSelectionSettingsUpdate(BaseModel):
 
 
 class AdminSelectionUserResponse(BaseModel):
+    default_limit: int
+    effective_limit: int
+    pending_count: int
+    confirmed_count: int
+    available: int | None
     user_id: UUID
     username: str
     full_name: str
@@ -69,8 +74,7 @@ class AdminSelectionUserUpdate(BaseModel):
     capacity: int | None = Field(default=None, ge=1, le=200)
     is_exempt: bool | None = None
     selection_mode: SelectionMode | None = None
-    # An explicit flag is required because an omitted optional integer and a
-    # request to clear an existing override would otherwise both be `None`.
+    # Reset the quota override, exemption and mentor selection mode together.
     use_default: bool = False
 
 

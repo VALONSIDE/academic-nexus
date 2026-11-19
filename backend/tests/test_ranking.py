@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 @pytest.fixture
 def ranking_db(monkeypatch):
+    monkeypatch.setattr(get_settings(), "ranking_enabled", True)
     monkeypatch.setattr(get_settings(), "siliconflow_api_key", SecretStr("test-key"))
     monkeypatch.setattr(ranking, "_blocked_until", 0)
     engine = create_engine("sqlite+pysqlite:///:memory:")

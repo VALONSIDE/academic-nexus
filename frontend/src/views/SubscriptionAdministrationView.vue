@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { CreditCard, Download, KeyRound, Landmark, RotateCcw, ShieldCheck } from 'lucide-vue-next'
+import { useRoute } from 'vue-router'
+import InstitutionReminder from '@/components/InstitutionReminder.vue'
+import type { SubscriptionInventory } from '@/lib/workspace'
 import { useI18n } from 'vue-i18n'
 
 import { ApiError, authApi } from '@/api/client'
@@ -13,6 +16,10 @@ import { useAuthStore } from '@/stores/auth'
 import type { InstitutionOption, InstitutionSubscriptionAllocation, PremiumSubscriptionKey, PremiumSubscriptionPlan } from '@/types/auth'
 
 const auth = useAuthStore()
+const route = useRoute()
+const inventory = ref<SubscriptionInventory[]>([])
+const inventoryLoading = ref(false)
+let inventoryRequest = 0
 const { t } = useI18n()
 const allocations = ref<InstitutionSubscriptionAllocation[]>([])
 const institutions = ref<InstitutionOption[]>([])
@@ -85,6 +92,7 @@ async function load() {
     allocations.value = nextAllocations
     keys.value = nextKeys
     institutions.value = nextInstitutions.filter((item, index, list) => list.findIndex(candidate => candidate.institution_abbr === item.institution_abbr) === index)
+    if (typeof route.query.institution === 'string' && institutions.value.some(item => item.institution_abbr === route.query.institution)) selectedInstitution.value = route.query.institution
     if (!institutions.value.some(item => item.institution_abbr === selectedInstitution.value)) selectedInstitution.value = institutions.value[0]?.institution_abbr || ''
     synchronizeSelection()
   } catch (exception) {
@@ -160,6 +168,22 @@ async function revokeKey(item: PremiumSubscriptionKey) {
 }
 
 watch(selectedInstitution, synchronizeSelection)
+async function loadInventory() {
+  const school = selectedInstitution.value
+  const current = ++inventoryRequest
+  if (!auth.state.token || !school) { inventory.value = []; inventoryLoading.value = false; return }
+  inventoryLoading.value = true
+  try {
+    const result = await authApi.subscriptionInventory(auth.state.token, school)
+    if (current === inventoryRequest) inventory.value = result
+  } catch {
+    if (current === inventoryRequest) { inventory.value = []; error.value = t('updateFailed') }
+  } finally { if (current === inventoryRequest) inventoryLoading.value = false }
+}
+watch([selectedInstitution, allocations, keys], loadInventory)
+watch(() => route.query.institution, value => {
+  if (typeof value === 'string' && institutions.value.some(item => item.institution_abbr === value)) selectedInstitution.value = value
+})
 onMounted(load)
 </script>
 
@@ -172,6 +196,21 @@ onMounted(load)
       <template v-else>
         <Card class="mt-7 p-5 sm:p-6"><div class="flex items-start gap-3"><span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-50 text-sky-700"><Landmark class="h-5 w-5" /></span><div><h2 class="font-semibold text-slate-900">{{ t('institution') }}</h2><p class="mt-1 text-sm leading-6 text-slate-600">{{ isSuperAdmin ? t('subscriptionAllocationHint') : t('institutionSubscriptionManagementDescription') }}</p></div></div><div class="mt-5 max-w-xl"><Select v-model="selectedInstitution" :options="institutionOptions" :placeholder="t('selectInstitution')" :disabled="!institutionOptions.length" /></div><p v-if="!institutionOptions.length" class="mt-3 text-sm text-slate-500">{{ t('selectInstitutionFirst') }}</p></Card>
 
+        <Card v-if="selectedInstitution" class="mt-6 p-5 sm:p-6">
+          <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="font-semibold">{{ t(isSuperAdmin ? 'inventoryOverview' : 'schoolInventory') }}</h2>
+            <InstitutionReminder v-if="isSuperAdmin" :institutions="institutionOptions" :initial-institution="selectedInstitution" />
+          </div>
+          <p v-if="inventoryLoading" class="mt-4 text-sm text-slate-500">{{ t('loading') }}</p>
+          <div v-else class="mt-4 grid gap-3 lg:grid-cols-3">
+            <div v-for="item in inventory" :key="item.plan" class="rounded-xl border border-slate-200 p-4">
+              <h3 class="font-semibold">{{ subscriptionPlanLabel(item.plan) }}</h3>
+              <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div v-for="key in (['available', 'issued', 'in_use', 'exhausted', 'expired', 'reclaimed', 'total_issued'] as const)" :key="key" class="rounded-lg bg-slate-50 px-3 py-2"><dt class="text-xs text-slate-500">{{ t(`inventory_${key}`) }}</dt><dd class="mt-1 text-lg font-semibold">{{ item[key] }}</dd></div>
+              </dl>
+            </div>
+          </div>
+        </Card>
+
         <section v-if="selectedInstitution" class="mt-6 grid gap-6 xl:grid-cols-[.9fr_1.1fr]">
           <Card v-if="isSuperAdmin" class="p-5 sm:p-6"><div class="flex items-center gap-2"><CreditCard class="h-5 w-5 text-sky-700" /><h2 class="font-semibold text-slate-900">{{ t('institutionSubscriptionAllocation') }}</h2></div><p class="mt-2 text-sm text-slate-600">{{ currentInstitution?.institution_name_zh }} · {{ selectedInstitution }}</p><form class="mt-5 grid gap-4 sm:grid-cols-3" @submit.prevent="saveAllocation"><label class="grid gap-1.5 text-sm font-medium text-slate-700">Pro<Input v-model="allocationForm.pro_credits" min="0" max="100000" type="number" required /></label><label class="grid gap-1.5 text-sm font-medium text-slate-700">Ultra<Input v-model="allocationForm.ultra_credits" min="0" max="100000" type="number" required /></label><label class="grid gap-1.5 text-sm font-medium text-slate-700">Max<Input v-model="allocationForm.max_credits" min="0" max="100000" type="number" required /></label><div class="sm:col-span-3"><Button type="submit" :disabled="saving">{{ saving ? t('loading') : t('saveSubscriptionAllocation') }}</Button></div></form></Card>
 
@@ -179,6 +218,7 @@ onMounted(load)
         </section>
 
         <Card v-if="selectedInstitution" class="mt-6 overflow-hidden p-0"><div class="flex items-center justify-between border-b border-slate-200 px-5 py-5 sm:px-6"><div><h2 class="font-semibold text-slate-900">{{ t('premiumSubscriptionKeys') }}</h2><p class="mt-1 text-sm text-slate-500">{{ t('subscriptionKeyHistoryHint') }}</p></div><span class="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">{{ filteredKeys.length }}</span></div><div v-if="filteredKeys.length" class="divide-y divide-slate-100"><div v-for="item in filteredKeys" :key="item.id" class="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between"><div><div class="flex items-center gap-2"><span class="font-medium text-slate-900">{{ subscriptionPlanLabel(item.plan_code) }}</span><span class="rounded-full px-2 py-0.5 text-xs" :class="item.status === 'activated' ? 'bg-emerald-100 text-emerald-800' : item.status === 'revoked' ? 'bg-slate-200 text-slate-600' : 'bg-amber-100 text-amber-800'">{{ statusLabel(item.status) }}</span></div><p class="mt-1 text-sm text-slate-500">{{ item.issued_at }}</p></div><Button v-if="item.status === 'issued'" type="button" size="sm" variant="outline" :disabled="saving" @click="revokeKey(item)"><RotateCcw class="mr-1.5 h-3.5 w-3.5" />{{ t('reclaimSubscriptionKey') }}</Button></div></div><div v-else class="p-10 text-center text-sm text-slate-500">{{ t('subscriptionKeysEmpty') }}</div></Card>
+        <div v-if="selectedInstitution" class="mt-6 flex justify-end"><RouterLink :to="{path: '/admin/subscriptions/history', query: {institution: selectedInstitution}}" class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium">{{ t('subscriptionHistory') }}</RouterLink></div>
       </template>
       <p v-if="notice" class="mt-5 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{{ notice }}</p><p v-if="error" class="mt-5 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-800">{{ error }}</p>
     </div>

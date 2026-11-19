@@ -1,6 +1,8 @@
 """Conversation persistence and bounded-context orchestration for AcademicNexus AI."""
 
+import hashlib
 from collections.abc import Iterator
+from sqlalchemy.exc import IntegrityError
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -8,12 +10,15 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
-from app.models.ai import AiConversation, AiMessage
+from app.models.ai import AiConversation, AiMessage, AiTurnRequest
 from app.models.resource import Resource
 from app.models.user import User
 from app.services import resources as resource_service
+from app.services.ai.selection_cards import proposed_card
+from app.services.contacts import draft_context, redact_unshared
 from app.services.matching import mentor_recommendations, student_candidates
-from app.services.ai.minimax import MiniMaxConfigurationError, MiniMaxRequestError, request_completion, stream_completion
+from app.services.ai.minimax import MiniMaxConfigurationError, MiniMaxRequestError
+from app.services.ai.providers import request_completion, stream_completion
 from app.services.ai.quota import complete_ai_call, release_ai_call, reserve_ai_call
 
 
@@ -40,15 +45,23 @@ class AiStreamEvent:
     assistant_message: AiMessage | None = None
 
 
-def model_profile(tier: str) -> AiModelProfile:
+def model_profile(tier: str, provider: str | None = None) -> AiModelProfile:
     settings = get_settings()
+    if provider not in (None, "minimax"):
+        if provider not in {"deepseek", "openai", "qwen"}:
+            raise AiAssistantError("invalid_provider")
+        model = getattr(settings, f"deepseek_{tier}_model", "") if provider == "deepseek" else getattr(settings, f"{provider}_model")
+        if tier not in {"light", "standard", "expert"}:
+            raise AiAssistantError("invalid_model_tier")
+        return AiModelProfile(model=f"{provider}:{tier}:{model}", credit_cost=2 if tier == "expert" else 1)
     profiles = {
         "light": AiModelProfile(model=settings.minimax_light_model, credit_cost=1),
         "standard": AiModelProfile(model=settings.minimax_standard_model, credit_cost=1),
         "expert": AiModelProfile(model=settings.minimax_expert_model, credit_cost=2),
     }
     try:
-        return profiles[tier]
+        profile = profiles[tier]
+        return AiModelProfile(model=f"minimax:{tier}:{profile.model}", credit_cost=profile.credit_cost) if provider else profile
     except KeyError as error:
         raise AiAssistantError("invalid_model_tier") from error
 
@@ -127,20 +140,13 @@ def list_messages(db: Session, conversation: AiConversation) -> list[AiMessage]:
 
 
 def _profile_context(user: User) -> str:
-    contact_values = [part for part in (f"Email: {user.email}" if user.email else "", f"Phone: {user.phone}" if user.phone else "") if part]
-    contact = (
-        "\nPrivate contact information (use only when the user explicitly asks to draft or verify their own contact details; never volunteer it): "
-        + "; ".join(contact_values)
-        if contact_values
-        else ""
-    )
     if user.student_profile is not None:
         profile = user.student_profile
-        return f"Role: student\nInstitution: {profile.university or ''}\nCollege: {profile.department or ''}\nResearch interests: {', '.join(profile.research_interests or [])}\nSkills: {', '.join(profile.skills or [])}\nAcademic goals: {profile.academic_goals or ''}\nResearch experience: {profile.research_experience or ''}{contact}"
+        return f"Role: student\nInstitution: {profile.university or ''}\nCollege: {profile.department or ''}\nResearch interests: {', '.join(profile.research_interests or [])}\nSkills: {', '.join(profile.skills or [])}\nAcademic goals: {profile.academic_goals or ''}\nResearch experience: {profile.research_experience or ''}"
     if user.mentor_profile is not None:
         profile = user.mentor_profile
-        return f"Role: mentor\nInstitution: {profile.university or ''}\nCollege: {profile.department or ''}\nResearch directions: {', '.join(profile.research_directions or [])}\nRepresentative papers: {', '.join(profile.representative_papers or [])}\nProjects: {profile.research_projects or ''}\nMentoring style: {profile.mentoring_style or ''}{contact}"
-    return f"Role: platform user{contact}"
+        return f"Role: mentor\nInstitution: {profile.university or ''}\nCollege: {profile.department or ''}\nResearch directions: {', '.join(profile.research_directions or [])}\nRepresentative papers: {', '.join(profile.representative_papers or [])}\nProjects: {profile.research_projects or ''}\nMentoring style: {profile.mentoring_style or ''}"
+    return "Role: platform user"
 
 
 def _resource_catalog_context(db: Session, user: User) -> str:
@@ -154,7 +160,7 @@ def _resource_catalog_context(db: Session, user: User) -> str:
         db.scalars(
             select(Resource)
             .options(selectinload(Resource.course), selectinload(Resource.paper), selectinload(Resource.book))
-            .where(Resource.tenant_id == user.tenant_id, Resource.is_published.is_(True))
+            .where(Resource.tenant_id == user.tenant_id, Resource.is_published.is_(True), resource_service.resource_visibility(user))
             .order_by(Resource.created_at.desc())
             .limit(24)
         ).all()
@@ -277,12 +283,17 @@ def _begin_turn(
     *,
     content: str,
     profile: AiModelProfile,
+    turn_request=None,
 ):
-    event = reserve_ai_call(db, user, conversation.id, model=profile.model, credit_cost=profile.credit_cost)
+    event = reserve_ai_call(db, user, conversation.id, model=profile.model, credit_cost=profile.credit_cost, commit=False)
     original_title = conversation.title
     original_last_message_at = conversation.last_message_at
     user_message = AiMessage(conversation_id=conversation.id, role="user", content=content)
     db.add(user_message)
+    db.flush()
+    if turn_request is not None:
+        turn_request.event_id = event.id
+        turn_request.user_message_id = user_message.id
     if conversation.title == DEFAULT_CONVERSATION_TITLE:
         conversation.title = content[:80]
     conversation.last_message_at = datetime.now(timezone.utc)
@@ -306,6 +317,10 @@ def _revert_turn(
     conversation.last_message_at = original_last_message_at
     db.commit()
     release_ai_call(db, event_id, error_code=error_code)
+    turn = db.scalar(select(AiTurnRequest).where(AiTurnRequest.event_id == event_id))
+    if turn:
+        turn.state = "failed"
+        db.commit()
 
 
 def _persist_reply(
@@ -316,17 +331,23 @@ def _persist_reply(
     content: str,
     input_tokens: int | None,
     output_tokens: int | None,
+    action_card=None,
 ) -> AiMessage:
     assistant_message = AiMessage(
         conversation_id=conversation.id,
         role="assistant",
         content=content,
+        action_card=action_card,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
     )
     db.add(assistant_message)
     conversation.last_message_at = datetime.now(timezone.utc)
     db.flush()
+    turn = db.scalar(select(AiTurnRequest).where(AiTurnRequest.event_id == event_id))
+    if turn:
+        turn.assistant_message_id = assistant_message.id
+        turn.state = "completed"
     complete_ai_call(db, event_id, input_tokens=input_tokens, output_tokens=output_tokens, commit=False)
     db.commit()
     db.refresh(assistant_message)
@@ -340,29 +361,46 @@ def send_message(
     *,
     content: str,
     model_tier: str = "standard",
+    provider: str | None = None,
+    request_id=None,
+    contact_user_id=None,
+    contact_channel=None,
+    selection_target_id=None,
 ) -> tuple[AiMessage, AiMessage]:
     """Reserve the selected model cost, persist a turn, invoke MiniMax, and refund failures."""
-    profile = model_profile(model_tier)
+    profile = model_profile(model_tier, provider)
+    contact_context = draft_context(db, user, contact_user_id, contact_channel)
+    turn_request, replay = _claim_turn(db, user, conversation, request_id, content, f"{profile.model}:{contact_user_id}:{contact_channel}:{selection_target_id}")
+    if replay:
+        return replay
+    card = proposed_card(db, user, selection_target_id, content) if conversation.topic == "selection_advisor" or selection_target_id else None
     event, user_message, original_title, original_last_message_at = _begin_turn(
         db,
         user,
         conversation,
         content=content,
         profile=profile,
+        turn_request=turn_request,
     )
     try:
+        system, messages = _provider_payload(db, user, conversation, contact_context, card)
         reply = request_completion(
-            system=_system_prompt(db, user, conversation),
-            messages=_bounded_messages(db, conversation),
+            system=system,
+            messages=messages,
             model=profile.model,
         )
     except MiniMaxConfigurationError as error:
         _revert_turn(db, conversation, user_message=user_message, event_id=event.id, original_title=original_title, original_last_message_at=original_last_message_at, error_code="provider_not_configured")
         raise AiAssistantError("provider_not_configured") from error
     except MiniMaxRequestError as error:
+        code = "provider_insufficient_balance" if str(error) == "provider_insufficient_balance" else "provider_request_failed"
+        _revert_turn(db, conversation, user_message=user_message, event_id=event.id, original_title=original_title, original_last_message_at=original_last_message_at, error_code=code)
+        raise AiAssistantError(code) from error
+    except Exception as error:
+        db.rollback()
         _revert_turn(db, conversation, user_message=user_message, event_id=event.id, original_title=original_title, original_last_message_at=original_last_message_at, error_code="provider_request_failed")
         raise AiAssistantError("provider_request_failed") from error
-    assistant_message = _persist_reply(db, conversation, event_id=event.id, content=reply.content, input_tokens=reply.input_tokens, output_tokens=reply.output_tokens)
+    assistant_message = _persist_reply(db, conversation, event_id=event.id, content=reply.content, input_tokens=reply.input_tokens, output_tokens=reply.output_tokens, action_card=card)
     return user_message, assistant_message
 
 
@@ -373,23 +411,36 @@ def stream_message(
     *,
     content: str,
     model_tier: str = "standard",
+    provider: str | None = None,
+    request_id=None,
+    contact_user_id=None,
+    contact_channel=None,
+    selection_target_id=None,
 ) -> Iterator[AiStreamEvent]:
     """Persist a streaming MiniMax turn while emitting only answer text deltas."""
-    profile = model_profile(model_tier)
+    profile = model_profile(model_tier, provider)
+    contact_context = draft_context(db, user, contact_user_id, contact_channel)
+    turn_request, replay = _claim_turn(db, user, conversation, request_id, content, f"{profile.model}:{contact_user_id}:{contact_channel}:{selection_target_id}")
+    if replay:
+        yield AiStreamEvent(user_message=replay[0], assistant_message=replay[1])
+        return
+    card = proposed_card(db, user, selection_target_id, content) if conversation.topic == "selection_advisor" or selection_target_id else None
     event, user_message, original_title, original_last_message_at = _begin_turn(
         db,
         user,
         conversation,
         content=content,
         profile=profile,
+        turn_request=turn_request,
     )
     pieces: list[str] = []
     completed = False
     error_code = "stream_interrupted"
     try:
+        system, messages = _provider_payload(db, user, conversation, contact_context, card)
         for provider_event in stream_completion(
-            system=_system_prompt(db, user, conversation),
-            messages=_bounded_messages(db, conversation),
+            system=system,
+            messages=messages,
             model=profile.model,
         ):
             if provider_event.text:
@@ -403,6 +454,7 @@ def stream_message(
                     content="".join(pieces).strip(),
                     input_tokens=provider_event.input_tokens,
                     output_tokens=provider_event.output_tokens,
+                    action_card=card,
                 )
                 completed = True
                 yield AiStreamEvent(user_message=user_message, assistant_message=assistant_message)
@@ -413,9 +465,52 @@ def stream_message(
         error_code = "provider_not_configured"
         raise AiAssistantError("provider_not_configured") from error
     except MiniMaxRequestError as error:
+        error_code = "provider_insufficient_balance" if str(error) == "provider_insufficient_balance" else "provider_request_failed"
+        raise AiAssistantError(error_code) from error
+    except Exception as error:
         error_code = "provider_request_failed"
-        raise AiAssistantError("provider_request_failed") from error
+        raise AiAssistantError(error_code) from error
     finally:
         if not completed:
             db.rollback()
             _revert_turn(db, conversation, user_message=user_message, event_id=event.id, original_title=original_title, original_last_message_at=original_last_message_at, error_code=error_code)
+
+
+def _claim_turn(db, user, conversation, request_id, content, model):
+    if request_id is None:
+        return None, None
+    fingerprint = hashlib.sha256(f"{conversation.id}:{model}:{content}".encode()).hexdigest()
+    old = db.get(AiTurnRequest, (user.id, request_id))
+    if old:
+        if old.fingerprint != fingerprint:
+            raise AiAssistantError("request_id_conflict")
+        if old.state == "completed":
+            first, last = db.get(AiMessage, old.user_message_id), db.get(AiMessage, old.assistant_message_id)
+            if first is not None and last is not None:
+                return old, (first, last)
+        raise AiAssistantError("request_in_progress" if old.state == "running" else "request_failed_use_new_id")
+    turn = AiTurnRequest(user_id=user.id, request_id=request_id, fingerprint=fingerprint)
+    db.add(turn)
+    try:
+        db.flush()
+    except IntegrityError as error:
+        db.rollback()
+        raise AiAssistantError("request_in_progress") from error
+    return turn, None
+
+
+def _provider_payload(db, user, conversation, contact_context, card=None):
+    if card:
+        contact_context += (
+            f"\nA platform action card will be shown after this answer. The verified candidate "
+            f"is {card['target_name']} and the permitted action is {card['action']}. "
+            "Explain the action briefly. Only the user's click executes it. "
+            "Never claim completion, generate UI, links, card JSON or another action. "
+            "Platform controls are rendered separately from your answer."
+        )
+    else:
+        contact_context += "\nOnly the platform creates action cards. Never claim to have executed a selection action or emit card JSON."
+    messages = _bounded_messages(db, conversation)
+    contents = [message["content"] if isinstance(message["content"], str) else "".join(block.get("text", "") for block in message["content"] if block.get("type") == "text") for message in messages]
+    texts = redact_unshared(db, user, [_system_prompt(db, user, conversation) + contact_context, *contents])
+    return texts[0], [{**message, "content": text} for message, text in zip(messages, texts[1:], strict=True)]

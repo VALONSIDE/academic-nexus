@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.pre_registration import PreRegistration
+from app.services.admin_scope import is_administrator
 from app.models.user import MentorProfile, Role, StudentProfile, User
 from app.schemas.auth import (
     ActivationRequest,
@@ -38,6 +39,10 @@ def serialize_user(user: User) -> UserResponse:
         full_name=user.full_name,
         phone=user.phone,
         email=user.email,
+        wechat=user.wechat,
+        share_email=bool(user.share_email),
+        share_phone=bool(user.share_phone),
+        share_wechat=bool(user.share_wechat),
         preferred_locale=user.preferred_locale,
         is_active=user.is_active,
         roles=sorted(role.code for role in user.roles),
@@ -126,7 +131,7 @@ def start_activation(payload: ActivationRequest, db: DbSession) -> ActivationSta
             is_verified=False,
             terms_accepted_at=datetime.now(timezone.utc),
             privacy_accepted_at=datetime.now(timezone.utc),
-            legal_document_version="2026-08-23-v1.0",
+            legal_document_version="2026-08-23-v1.1",
         )
         user.roles.append(role)
         db.add(user)
@@ -138,7 +143,7 @@ def start_activation(payload: ActivationRequest, db: DbSession) -> ActivationSta
         user.preferred_locale = payload.preferred_locale
         user.terms_accepted_at = datetime.now(timezone.utc)
         user.privacy_accepted_at = datetime.now(timezone.utc)
-        user.legal_document_version = "2026-08-23-v1.0"
+        user.legal_document_version = "2026-08-23-v1.1"
 
     if pre_registration.role_code == "student":
         profile = user.student_profile or db.scalar(select(StudentProfile).where(StudentProfile.user_id == user.id))
@@ -227,6 +232,8 @@ def update_contact_phone(
     current_user: CurrentUser,
     db: DbSession,
 ) -> UserResponse:
+    if is_administrator(current_user):
+        raise HTTPException(403, detail={"code": "administrator_contact_disabled"})
     current_user.phone = payload.phone
     db.commit()
     db.refresh(current_user)
@@ -239,6 +246,17 @@ def update_contact(
     current_user: CurrentUser,
     db: DbSession,
 ) -> UserResponse:
+    if is_administrator(current_user):
+        raise HTTPException(403, detail={"code": "administrator_contact_disabled"})
+    academic = any(role.code in {"student", "mentor"} for role in current_user.roles)
+    if academic and (("email" in payload.model_fields_set and not payload.email) or ("wechat" in payload.model_fields_set and not payload.wechat)):
+        raise HTTPException(422, detail="Email and WeChat ID are required / 邮箱及微信号为必填")
+    for field in ("wechat", "share_email", "share_phone", "share_wechat"):
+        if field in payload.model_fields_set:
+            value = getattr(payload, field)
+            if field.startswith("share_") and value is None:
+                raise HTTPException(422, detail="Visibility must be true or false")
+            setattr(current_user, field, value)
     if "email" in payload.model_fields_set:
         ensure_email_available(db, current_user, payload.email)
         current_user.email = payload.email
@@ -258,3 +276,11 @@ def change_own_password(payload: PasswordChangeRequest, current_user: CurrentUse
     db.commit()
     db.refresh(current_user)
     return authenticate_response(current_user)
+
+
+@router.post("/logout", status_code=204, summary="Sign out all sessions / 退出全部登录会话")
+def logout(current_user: CurrentUser, db: DbSession) -> None:
+    # Lock the latest version so concurrent revocations cannot restore an old session.
+    db.refresh(current_user, with_for_update=True)
+    current_user.auth_version += 1
+    db.commit()

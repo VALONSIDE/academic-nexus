@@ -30,7 +30,7 @@ def test_template_requires_chinese_institution_and_college_names() -> None:
     assert tuple(cell.value for cell in next(workbook[TEMPLATE_SHEET].iter_rows(min_row=1, max_row=1))) == TEMPLATE_HEADERS
     examples = workbook["填写示例 Examples"]
     assert tuple(cell.value for cell in examples[2][:6]) == ("CUC", "中国传媒大学", "新闻学院", "学生", "张同学", "20240001")
-    assert tuple(cell.value for cell in examples[3][:6]) == ("CUC", "中国传媒大学", "新闻学院", "导师", "李老师", "T10086")
+    assert tuple(cell.value for cell in examples[3][:6]) == ("CUC", "中国传媒大学", "新闻学院", "导师", "李老师", "10086")
 
 
 def test_partner_import_generates_unique_bound_access_keys_and_identity() -> None:

@@ -28,7 +28,7 @@ const password = ref('')
 const selectionConfig = ref<AdminSelectionUser | null>(null)
 const selectionLimit = ref<number | null>(null)
 const selectionExempt = ref(false)
-const basic = reactive({ full_name: '', phone: '', email: '', is_active: true })
+const basic = reactive({ full_name: '', phone: '', email: '', wechat: '', is_active: true })
 const phoneValid = ref(true)
 
 const title = computed(() => props.role === 'student' ? t('studentManagement') : t('mentorManagement'))
@@ -38,11 +38,23 @@ const isScopedAdministrator = computed(() => {
   return roles.includes('institution_admin') && !roles.includes('admin') && !roles.includes('super_admin')
 })
 
+const canEditContact = computed(() => !isScopedAdministrator.value && selected.value &&
+  !selected.value.roles.some(role => ['admin', 'super_admin', 'institution_admin'].includes(role)))
+
+function toggleSelected(user: ManagedUser) {
+  if (selected.value?.id === user.id) {
+    selected.value = null
+    selectionConfig.value = null
+  } else applySelected(user)
+}
+
 function applySelected(user: ManagedUser) {
   selected.value = user
   basic.full_name = user.full_name
   basic.phone = user.phone || ''
   basic.email = user.email || ''
+  basic.wechat = user.wechat || ''
+  selectionConfig.value = null
   basic.is_active = user.is_active
   password.value = ''
   error.value = ''
@@ -54,6 +66,7 @@ async function loadSelectionConfig(user: ManagedUser) {
   if (!auth.state.token) return
   try {
     const values = await authApi.adminSelectionUsers(auth.state.token, props.role)
+    if (selected.value?.id !== user.id) return
     selectionConfig.value = values.find((item) => item.user_id === user.id) || null
     selectionLimit.value = props.role === 'student' ? selectionConfig.value?.choice_limit ?? null : selectionConfig.value?.capacity ?? null
     selectionExempt.value = selectionConfig.value?.is_exempt ?? false
@@ -65,8 +78,8 @@ async function saveSelectionConfig() {
   saving.value = true
   try {
     const result = await authApi.updateAdminSelectionUser(auth.state.token, selected.value.id, props.role === 'student'
-      ? { choice_limit: selectionLimit.value || undefined, is_exempt: selectionExempt.value }
-      : { capacity: selectionLimit.value || undefined, is_exempt: selectionExempt.value })
+      ? { choice_limit: selectionLimit.value, is_exempt: selectionExempt.value }
+      : { capacity: selectionLimit.value, is_exempt: selectionExempt.value })
     selectionConfig.value = result
     notice.value = t('selectionUpdated')
   } catch { error.value = t('updateFailed') } finally { saving.value = false }
@@ -122,7 +135,7 @@ async function batchSetActive(isActive: boolean) {
 
 async function saveBasic() {
   if (!auth.state.token || !selected.value) return
-  if (basic.phone && !phoneValid.value) {
+  if (canEditContact.value && !phoneValid.value) {
     error.value = t('invalidInternationalPhone')
     return
   }
@@ -130,7 +143,7 @@ async function saveBasic() {
   error.value = ''
   notice.value = ''
   try {
-    const result = await authApi.updateManagedUser(auth.state.token, selected.value.id, { ...basic })
+    const result = await authApi.updateManagedUser(auth.state.token, selected.value.id, {full_name: basic.full_name, is_active: basic.is_active, ...(canEditContact.value ? {phone: basic.phone, ...(basic.email.trim() ? {email: basic.email} : {}), ...(basic.wechat.trim() ? {wechat: basic.wechat} : {})} : {})})
     replaceUser(result)
     notice.value = t('userSaved')
   } catch (exception) {
@@ -200,16 +213,19 @@ watch(() => props.role, () => {
         <div v-else-if="users.length === 0" class="p-8 text-center text-sm text-slate-500">{{ t('noUsers') }}</div>
         <div v-if="selectedIds.length" class="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-sky-50 px-5 py-3"><span class="mr-auto text-sm font-medium text-sky-900">{{ t('selectedCount', { count: selectedIds.length }) }}</span><Button size="sm" variant="outline" :disabled="saving" @click="batchSetActive(true)">{{ t('batchEnable') }}</Button><Button size="sm" variant="outline" :disabled="saving" @click="batchSetActive(false)">{{ t('batchDisable') }}</Button></div>
         <div class="divide-y divide-slate-100">
-          <button v-for="user in users" :key="user.id" type="button" class="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-4 px-5 py-4 text-left transition hover:bg-slate-50" :class="selected?.id === user.id ? 'bg-sky-50' : ''" @click="applySelected(user)">
+          <div v-for="user in users" :key="user.id" class="flex items-center gap-3 px-5">
+            <input v-model="selectedIds" :value="user.id" type="checkbox" class="size-4 shrink-0" :aria-label="user.full_name" />
+            <Button type="button" variant="ghost" class="grid h-auto w-full grid-cols-[minmax(0,1fr)_auto] justify-start gap-4 whitespace-normal px-2 py-4 text-left" :aria-expanded="selected?.id === user.id" :class="selected?.id === user.id ? 'bg-sky-50' : ''" @click="toggleSelected(user)">
             <span class="min-w-0">
-              <span class="flex items-center gap-3"><input v-model="selectedIds" :value="user.id" type="checkbox" class="h-4 w-4 shrink-0" @click.stop /><span class="block truncate font-medium text-slate-900">{{ user.full_name }}</span></span>
+              <span class="flex items-center gap-3"><span class="block truncate font-medium text-slate-900">{{ user.full_name }}</span></span>
               <span class="mt-1 block truncate text-sm text-slate-500">{{ user.username }} · {{ user.academic_id }}</span>
             </span>
             <span class="flex items-center gap-2 text-xs font-medium">
               <span class="rounded-full px-2 py-1" :class="user.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'">{{ user.is_active ? t('active') : t('disabled') }}</span>
               <span class="rounded-full px-2 py-1" :class="user.profile_completed ? 'bg-sky-100 text-sky-800' : 'bg-amber-100 text-amber-800'">{{ user.profile_completed ? t('complete') : t('incomplete') }}</span>
             </span>
-          </button>
+            </Button>
+          </div>
         </div>
       </Card>
 
@@ -225,12 +241,18 @@ watch(() => props.role, () => {
             <div><dt class="text-slate-500">{{ t('schoolChineseName') }}</dt><dd class="mt-1 font-medium text-slate-900">{{ selected.institution_name_zh || selected.institution_abbr }}</dd></div>
             <div><dt class="text-slate-500">{{ t('collegeChineseName') }}</dt><dd class="mt-1 font-medium text-slate-900">{{ selected.college_name_zh || '—' }}</dd></div>
             <div><dt class="text-slate-500">{{ t('profileStatus') }}</dt><dd class="mt-1 font-medium text-slate-900">{{ selected.profile_completed ? t('complete') : t('incomplete') }}</dd></div>
-            <div><dt class="text-slate-500">{{ t('email') }}</dt><dd class="mt-1 break-all font-medium text-slate-900">{{ selected.email || '—' }}</dd></div>
+
+            <template v-if="isScopedAdministrator && !selected.roles.some(role => ['admin', 'super_admin', 'institution_admin'].includes(role))">
+              <div><dt class="text-slate-500">{{ t('contactPhone') }}</dt><dd>{{ selected.phone || t('contactNotShared') }}</dd></div>
+              <div><dt class="text-slate-500">{{ t('email') }}</dt><dd class="break-all">{{ selected.email || t('contactNotShared') }}</dd></div>
+              <div><dt class="text-slate-500">{{ t('wechatId') }}</dt><dd class="break-all">{{ selected.wechat || t('contactNotShared') }}</dd></div>
+            </template>
           </dl>
           <form class="mt-6 space-y-4 border-t border-slate-100 pt-6" @submit.prevent="saveBasic">
             <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('fullName') }}<Input v-model="basic.full_name" required /></label>
-            <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('contactPhone') }}<InternationalPhoneInput v-model="basic.phone" @valid="phoneValid = $event" /></label>
-            <label class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('email') }}<Input v-model="basic.email" type="email" autocomplete="email" maxlength="320" /></label>
+            <label v-if="canEditContact" class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('contactPhone') }}<InternationalPhoneInput v-model="basic.phone" @valid="phoneValid = $event" /></label>
+            <label v-if="canEditContact" class="grid gap-1.5 text-sm font-medium text-slate-700">{{ t('email') }}<Input v-model="basic.email" :required="Boolean(selected.email)" type="email" autocomplete="email" maxlength="320" /></label>
+            <label v-if="canEditContact" class="grid gap-1.5 text-sm font-medium">{{ t('wechatId') }}<Input v-model="basic.wechat" :required="Boolean(selected.wechat)" maxlength="64" /></label>
             <label class="flex items-center gap-2 text-sm font-medium text-slate-700"><input v-model="basic.is_active" type="checkbox" class="h-4 w-4 rounded border-slate-300" />{{ basic.is_active ? t('active') : t('disabled') }}</label>
             <Button type="submit" :disabled="saving">{{ saving ? t('loading') : t('save') }}</Button>
           </form>

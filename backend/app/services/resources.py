@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from zipfile import ZipFile, BadZipFile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.models.resource import Book, Course, MentorResourceQuota, Paper, Resource
-from app.models.user import StudentProfile, User
+from app.models.user import StudentProfile, MentorProfile, User
 
 
 MEGABYTE = 1024 * 1024
@@ -92,6 +93,7 @@ async def _stage_upload(upload: UploadFile) -> StagedFile | None:
                 if size > limit:
                     raise ResourceError("file_too_large")
                 stream.write(chunk)
+        _validate_upload_content(temporary_path, extension, size)
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
@@ -143,14 +145,15 @@ def release_file_bytes(db: Session, mentor_id, size_bytes: int) -> None:
     quota.used_bytes = max(0, quota.used_bytes - size_bytes)
 
 
-def update_quota(db: Session, mentor_id, quota_mb: int) -> MentorResourceQuota:
+def update_quota(db: Session, mentor_id, quota_mb: int, *, commit: bool = True) -> MentorResourceQuota:
     quota = _quota(db, mentor_id, lock=True)
     requested = quota_mb * MEGABYTE
     if requested < quota.used_bytes:
         raise ResourceError("quota_below_used_storage")
     quota.quota_bytes = requested
-    db.commit()
-    db.refresh(quota)
+    if commit:
+        db.commit()
+        db.refresh(quota)
     return quota
 
 
@@ -250,9 +253,20 @@ def delete_stored_file(resource: Resource) -> None:
         target.unlink(missing_ok=True)
 
 
-def _resource_statement(*, tenant_id, owner_user_id=None, resource_type: str | None = None, search: str = ""):
+def resource_visibility(viewer: User):
+    profile = viewer.student_profile or viewer.mentor_profile
+    institution = profile.institution_abbr if profile else None
+    if not institution or not institution.strip():
+        return Resource.owner_user_id == viewer.id
+    owners = select(User.id).where(User.tenant_id == viewer.tenant_id, User.mentor_profile.has(MentorProfile.institution_abbr == institution))
+    return or_(Resource.owner_user_id == viewer.id, Resource.owner_user_id.in_(owners))
+
+
+def _resource_statement(*, tenant_id, viewer=None, owner_user_id=None, resource_type: str | None = None, search: str = ""):
     statement = select(Resource).options(selectinload(Resource.course), selectinload(Resource.paper), selectinload(Resource.book))
     statement = statement.where(Resource.tenant_id == tenant_id, Resource.is_published.is_(True))
+    if viewer is not None:
+        statement = statement.where(resource_visibility(viewer))
     if owner_user_id is not None:
         statement = statement.where(Resource.owner_user_id == owner_user_id)
     if resource_type:
@@ -263,15 +277,17 @@ def _resource_statement(*, tenant_id, owner_user_id=None, resource_type: str | N
     return statement.order_by(Resource.created_at.desc())
 
 
-def list_resources(db: Session, *, tenant_id, owner_user_id=None, resource_type: str | None = None, search: str = "") -> list[Resource]:
-    return list(db.scalars(_resource_statement(tenant_id=tenant_id, owner_user_id=owner_user_id, resource_type=resource_type, search=search)).all())
+def list_resources(db: Session, *, tenant_id, viewer=None, owner_user_id=None, resource_type: str | None = None, search: str = "") -> list[Resource]:
+    return list(db.scalars(_resource_statement(tenant_id=tenant_id, viewer=viewer, owner_user_id=owner_user_id, resource_type=resource_type, search=search)).all())
 
 
-def get_resource(db: Session, *, tenant_id, resource_id, lock: bool = False) -> Resource | None:
+def get_resource(db: Session, *, tenant_id, resource_id, lock: bool = False, viewer=None) -> Resource | None:
     statement = (select(Resource)
         .options(selectinload(Resource.course), selectinload(Resource.paper), selectinload(Resource.book))
         .where(Resource.id == resource_id, Resource.tenant_id == tenant_id)
     )
+    if viewer is not None:
+        statement = statement.where(resource_visibility(viewer))
     if lock:
         statement = statement.with_for_update().execution_options(populate_existing=True)
     return db.scalar(statement)
@@ -311,7 +327,7 @@ def recommendation_score(profile: StudentProfile, resource: Resource) -> int:
 def recommended_resources(db: Session, student: User, *, limit: int) -> list[tuple[Resource, int]]:
     if student.student_profile is None:
         return []
-    resources = list_resources(db, tenant_id=student.tenant_id)
+    resources = list_resources(db, tenant_id=student.tenant_id, viewer=student)
     from app.services import ranking
     candidates = [ranking.Candidate(str(resource.id), ranking.clean_text("; ".join(
         [resource.title, resource.description or "", *(resource.topics or []), *(resource.tags or [])])),
@@ -320,3 +336,32 @@ def recommended_resources(db: Session, student: User, *, limit: int) -> list[tup
     db.info["resource_ranking_mode"] = result.mode
     ranked = [(resource, result.scores[str(resource.id)]) for resource in resources]
     return sorted(ranked, key=lambda item: (-item[1], str(item[0].id)))[:limit]
+
+
+def _validate_upload_content(path: Path, extension: str, size: int) -> None:
+    if size == 0:
+        raise ResourceError("empty_file")
+    with path.open("rb") as file:
+        header = file.read(8192)
+    if extension == ".pdf" and not header.startswith(b"%PDF-"):
+        raise ResourceError("file_content_mismatch")
+    if extension in {".doc", ".ppt", ".xls"} and not header.startswith(bytes.fromhex("D0CF11E0A1B11AE1")):
+        raise ResourceError("file_content_mismatch")
+    if extension in {".txt", ".md"}:
+        if b"\x00" in header or header.startswith(b"MZ"):
+            raise ResourceError("file_content_mismatch")
+    if extension in {".zip", ".docx", ".pptx", ".xlsx"}:
+        try:
+            with ZipFile(path) as archive:
+                entries = archive.infolist()
+                if len(entries) > 10000 or sum(item.file_size for item in entries) > 500 * MEGABYTE:
+                    raise ResourceError("unsafe_archive")
+                if any(item.flag_bits & 1 for item in entries):
+                    raise ResourceError("unsafe_archive")
+                if extension != ".zip":
+                    names = set(archive.namelist())
+                    folder = {".docx": "word/", ".pptx": "ppt/", ".xlsx": "xl/"}[extension]
+                    if "[Content_Types].xml" not in names or not any(name.startswith(folder) for name in names) or any("vbaproject" in name.lower() for name in names):
+                        raise ResourceError("file_content_mismatch")
+        except (BadZipFile, OSError) as error:
+            raise ResourceError("file_content_mismatch") from error

@@ -1,3 +1,5 @@
+import { APP_VERSION } from '@/version'
+
 export type LegalDocumentId =
   | 'terms'
   | 'privacy'
@@ -9,237 +11,239 @@ export type LegalDocumentId =
   | 'storage'
   | 'rights'
 
+type Section = [title: string, ...paragraphs: string[]]
+
 export interface LegalDocument {
   id: LegalDocumentId
   title: string
   eyebrow: string
   summary: string
-  sections: { title: string; paragraphs: string[]; bullets?: string[] }[]
+  sections: Section[]
+  links?: { label: string; href: string }[]
 }
 
-const effective = '2026-08-23 · v1.1'
+export const LEGAL_UPDATED_AT = '2026-11-19'
+export const PROJECT_REPOSITORY = 'https://github.com/VALONSIDE/academic-nexus'
 
-export const legalDocuments: Record<'zh-CN' | 'en-US', LegalDocument[]> = {
-  'zh-CN': [
+const copyrightRule = 'https://ipc.court.gov.cn/zh-cn/news/view-6245.html'
+const privacyLaw = 'https://www.samr.gov.cn/zw/zfxxgk/fdzdgknr/bgt/art/2023/art_f374e8245320413181742e6d1baf4366.html'
+const aiLabelRule = 'https://www.cac.gov.cn/2025-03/14/c_1743654684782215.htm'
+
+function documentSet(label: string, documents: Omit<LegalDocument, 'eyebrow'>[]): LegalDocument[] {
+  return documents.map(item => ({ ...item, eyebrow: `${APP_VERSION} · ${label} ${LEGAL_UPDATED_AT}` }))
+}
+
+export const legalDocuments = {
+  'zh-CN': documentSet('更新于', [
     {
       id: 'terms',
-      eyebrow: '生效日期：' + effective,
       title: '智导未来服务协议',
-      summary: '本协议约定账户、院校服务、平台功能及使用者的基本权利和义务。',
+      summary: '适用于合作院校授权的账户以及学术画像、师生匹配、资源、订阅和 AI 学术助手。',
       sections: [
-        { title: '一、协议主体与适用范围', paragraphs: ['智导未来（AcademicNexus，以下称“平台”）面向已获合作院校授权的学生、教师和管理员提供学术画像、师生匹配、资源管理、AI 学术辅助及订阅权益管理等服务。本协议适用于网站、应用页面、管理后台和与其直接相关的服务功能。账户由院校预登记并通过 Access Key 激活；使用服务即表示你已阅读并同意本协议及相关规则。'] },
-        { title: '二、账户与授权', paragraphs: ['你应提供真实、准确、完整的账户资料，并妥善保管密码、Access Key 和订阅 Key。账户仅限本人使用，不得出租、出借、转让、共享或协助他人绕过验证、配额、院校范围和权限控制。院校管理员仅可在授权院校范围内管理学生、教师和订阅事项；超级管理员仅按平台职责管理全局配置。'] },
-        { title: '三、可接受使用', paragraphs: ['你应遵守适用法律、学校管理制度、网络秩序和学术诚信要求。不得利用平台实施或协助实施违法、欺诈、骚扰、歧视、侵犯隐私、侵犯知识产权、破坏系统安全、批量抓取、逆向工程、探测他人信息、传播违法有害内容或其他不当行为。'] },
-        { title: '四、服务调整与责任边界', paragraphs: ['平台可能因安全、合规、维护、院校要求或功能升级调整、暂停或终止部分服务，并在合理可行范围内进行提示。平台提供的是学术发展辅助工具，不替代院校、教师或专业人士的独立判断；你应对输入内容、使用行为和对输出的最终采用负责。'] },
-        { title: '五、违约处理与规则变更', paragraphs: ['发现异常、滥用或违规使用时，平台可依情节采取提醒、限制功能、暂停账户、终止服务、保留必要安全记录并按适用规则配合处置等措施。协议或相关规则发生实质变化时，平台将更新版本和生效日期；继续使用变更后的服务即表示在法律允许范围内接受更新后的规则。'] },
+        ['服务与协议主体', '智导未来（AcademicNexus）由各部署的服务运营方为合作院校提供。具体运营方、涉及个人信息的责任主体和联络方式由该部署的正式公告载明。自行部署者应为自己的服务和数据处理提供相应告知。激活时请分别阅读并确认本协议和隐私政策。'],
+        ['账户、工作台和权限', '师生凭预注册回执中的 Access Key 激活账户。请提供真实资料并妥善保管密码和凭证。兼任管理员的师生使用同一账号切换工作台，各项操作受对应角色及院校权限约束。不得共享账户、冒用身份、绕过授权或配额。'],
+        ['院校服务与使用规范', '尊重适用法律、院校规则、知识产权和学术诚信。不得滥用托管服务实施未经授权的数据采集、骚扰、欺诈、侵害隐私或干扰系统。师生双选以系统记录的状态和院校制度为准。匹配分数、通知和 AI 建议供人工判断使用。'],
+        ['运营调整、权利与协议更新', '为维护服务、安全或履行法定义务，运营方可在必要范围内调整服务、记录事件或限制违规账户，并通过适用渠道告知。涉及用户权益的实质性条款变更会适当告知，并在适用法律要求时另行取得同意。强制性法定权利和责任依适用法律执行。'],
       ],
     },
     {
       id: 'privacy',
-      eyebrow: '生效日期：' + effective,
       title: '隐私政策',
-      summary: '本政策以目的明确、最小必要、公开透明和安全保障为原则，说明个人信息的处理规则。',
+      summary: '说明身份和联系方式如何使用、哪些数据可能交由外部服务处理，以及个人信息权利的请求方式。',
       sections: [
-        { title: '一、处理者、场景与依据', paragraphs: ['平台在合作院校授权及适用法律允许的范围内处理提供服务所必需的信息。平台与相关院校应各自在其法定职责和实际控制范围内履行个人信息保护责任；具体部署主体、个人信息保护联络方式和数据存储安排，以院校上线公告及正式服务页面公示的信息为准。处理通常基于提供服务、履行法定义务、维护安全或取得你的有效同意。'] },
-        { title: '二、收集的信息与用途', paragraphs: ['我们处理院校预登记的身份与角色信息、登录和安全信息、你填写的学术画像、资源提交信息、师生匹配和选择记录、AI 对话内容、订阅状态及必要的操作审计记录。用途限于身份验证、账户和权限管理、画像与匹配、资源与 AI 服务、订阅交付、故障排查、防欺诈和安全维护。'], bullets: ['请勿在 AI 对话或资源中提交与任务无关的身份证件号码、金融账户、健康信息、密码、Access Key、订阅 Key 或他人未授权信息。', 'AI 对话按账户保存，并受每个账户最多 100 条会话的产品限制。', '平台不会出售个人信息，也不会将其用于与已告知服务无关的营销用途。'] },
-        { title: '三、共享、委托与跨境', paragraphs: ['个人信息仅在实现服务所必需的范围内向同一院校内的获授权管理员、你主动选择的匹配对象、依法有权机关或受托服务提供者披露。AI 请求可能由已配置的模型服务提供者处理；提交前请去除不必要的个人信息。若发生需要单独同意的敏感信息处理、对外提供或跨境提供，平台将依法另行告知并取得相应同意或完成适用程序。'] },
-        { title: '四、保存、删除与安全', paragraphs: ['信息仅在实现处理目的、满足院校管理需要和履行法定义务所需的最短期限内保存。账户注销、信息删除、保存期限届满或服务停止后，平台将按适用规则删除、匿名化或依法保留必要信息。平台采取角色和院校范围控制、密码哈希、会话失效、Key 指纹校验、访问限制和安全审计等措施，但互联网传输不存在绝对安全。'] },
-        { title: '五、你的权利与行使方式', paragraphs: ['你可以在平台内查看、更正部分账户和画像信息、修改密码并管理订阅。对于查阅、复制、更正、删除、撤回同意、注销账户、解释自动化辅助结果或投诉等请求，可先向所属院校管理员提交。平台和院校将在核验身份、适用法律、院校职责及不损害他人合法权益的前提下处理。'] },
+        ['责任主体与联系方式', '个人信息处理者、联系方式、部署地域及院校和运营方各自承担的处理职责，以实际部署公示为准。涉及个人信息的请求可通过所属院校管理员转交该部署的责任主体。'],
+        ['收集来源、目的和范围', '院校提供姓名、学工号、校院信息和预注册角色。激活时处理账号、Access Key 校验信息、密码哈希及服务协议和隐私政策的确认时间。师生完成设置时需提供邮箱和微信号，手机号可选。平台还按实际使用处理学术画像、资源、双选状态、订阅及额度、通知、AI 对话和必要的安全操作记录，用于提供相应功能、维护安全和履行适用义务。'],
+        ['站内查看与联系', '邮箱、手机号和微信号默认隐藏，可逐项选择是否向同校用户展示。院校管理员仅在授权院校范围内查看已公开的联系字段；超级管理员可按账户管理职责查看和更正普通师生的联系方式。管理员账户不提供联系方式编辑功能，个人联系方式也不会通过师生联系功能展示。发邮件时会打开本机邮件程序，复制联系信息会写入设备剪贴板。实际发送及其记录按相关客户端和服务规则处理。'],
+        ['外部模型、推荐和数据提供', '使用 AI 学术助手时，请求、近期会话和该场景所需的画像、资源或候选上下文可能发送给所选且已配置的模型服务商，例如 DeepSeek、MiniMax、OpenAI 或通义千问。主动选择同校对象起草消息时，该渠道已公开的联系信息会供本次请求使用。启用语义排序时，经筛选的学术文本可能交由硅基流动处理。部署方应公示实际接收方、处理目的、方式、数据类别、保存安排和适用地域。依法需要单独同意、影响评估或跨境程序时，应在处理前完成。'],
+        ['保存、安全与你的权利', '账户、资源、会话和业务记录按处理目的、部署方公示期限及法定义务保存。你可以修改可编辑资料和展示设置，也可删除自己的 AI 会话。删除平台内会话不直接删除第三方依法或依其条款留存的数据。查阅、复制、更正、删除、撤回同意、注销及投诉等请求见用户权利与争议处理规则。'],
       ],
+      links: [{ label: '《中华人民共和国个人信息保护法》', href: privacyLaw }],
     },
     {
       id: 'ai',
-      eyebrow: '生效日期：' + effective,
       title: 'AI 服务与算法辅助说明',
-      summary: '本说明明确 AI 学术助手的功能边界、输入输出要求、透明度和人工复核规则。',
+      summary: '说明外部模型、匹配建议、生成内容标识和双选办理卡片。',
       sections: [
-        { title: '一、功能定位', paragraphs: ['AI 学术助手可协助学习路径规划、研究准备、资源使用和师生沟通。其输出由模型基于输入生成，具有概率性，可能存在不完整、不准确、过时或不适用于具体情形的内容。输出仅作辅助参考，不构成招生录取、学业评价、处分、医疗、心理、法律、金融或其他高风险领域的最终决定或专业意见。'] },
-        { title: '二、输入、输出与人工复核', paragraphs: ['你应仅输入完成任务所必需的信息，避免提交敏感个人信息和机密材料。使用输出前，应自行核验事实、引文、计算、来源、版权归属和适用性。涉及课程作业、论文、项目、申报、评审或教学活动时，应遵守院校关于 AI 使用、署名、引用和披露的具体规则，并保留必要的人工判断。'] },
-        { title: '三、算法辅助与选择权', paragraphs: ['画像、匹配和推荐功能依据已授权信息产生辅助性排序或建议，不替代人为审核。你可通过完善、更新或更正相关资料改善建议基础；在适用场景中，可选择不依赖个性化建议或向院校管理员请求解释、人工复核和反馈。平台不应仅凭自动化处理作出对个人权益有重大影响的决定。'] },
-        { title: '四、安全治理与反馈', paragraphs: ['不得利用 AI 生成、传播或协助生成违法、仇恨、歧视、欺诈、虚假、侵权、隐私侵害或其他有害内容。发现明显错误、偏见、安全风险或疑似违规内容时，应停止依赖相关输出并向所属院校管理员反馈。平台可对异常或违规使用采取必要的安全处置。'] },
+        ['模型和输入范围', '根据部署配置选择可用模型。平台会发送完成当前任务所需的对话和上下文。请勿提交密码、Key、未授权的他人资料或与任务无关的敏感信息。起草邮件、短信或微信消息时，平台按站内展示设置校验选定联系人。草稿由你核对并在相应客户端发送。'],
+        ['输出核验与标识', '聊天中的模型回复标有“AI 生成”。回答可能出现事实、来源、推理或引用错误。对外复制、发布或提交时，按适用规定及院校要求保留、补充 AI 标识并披露使用情况，核对事实、出处、个人信息及授权。'],
+        ['匹配排序与双选操作', '匹配排序依据画像中的学术信息提供相关性建议。你可以修正画像、按条件筛选候选并自主决定是否发起双选。服务端按学校、角色和双选状态生成办理卡片，点击办理按钮才会提交操作，并再次校验权限和额度。录取、评价及其他重要决定由有权人员依适用规则作出。'],
+        ['反馈', '对推荐结果、涉嫌侵权内容、偏见、错误或安全问题，请记录发生时间和必要定位信息，通过所属院校管理员反馈。提交反馈时请遮蔽无关信息。'],
       ],
+      links: [{ label: '《人工智能生成合成内容标识办法》', href: aiLabelRule }],
     },
     {
       id: 'subscription',
-      eyebrow: '生效日期：' + effective,
       title: '订阅服务规则',
-      summary: '本规则说明普通与高级订阅、额度周期、院校 Key 和离线交付的适用条件。',
+      summary: '说明普通与高级订阅、额度扣减、院校库存、Key 和交付。',
       sections: [
-        { title: '一、档位与周期', paragraphs: ['普通账户的对话额度为每订阅周期 10 次；Pro、Ultra、Max 高级订阅分别为每周期 50、100、200 次。普通账户以注册日为周期起点；高级订阅以 Key 激活日为周期起点。高级周期结束且未获得新的有效高级权益时，账户回到普通档位，普通周期自最后高级周期截止日重新起算。页面显示的当前档位、余额和周期日期为准。'] },
-        { title: '二、Key 的签发与限制', paragraphs: ['高级订阅 Key 由超级管理员向院校分配额度后，由有权院校管理员签发。Key 为一次性、院校绑定凭证，仅可由符合该院校条件的账户激活；不支持在有效高级订阅期间升级、降级或重复激活。已激活 Key 不可撤回；未激活 Key 可由有权管理员收回，收回后永久失效且相应院校额度恢复。'] },
-        { title: '三、离线交付', paragraphs: ['为避免平台保存 Key 明文，签发回执仅在签发时以 Excel 形式下载。管理员可将回执导入离线交付页面进行实时核验，选择直接为未订阅账户激活，或导出指定用户/通用 PDF 通知单。直接激活会立即消耗 Key；PDF 导出不改变 Key 状态。通用 PDF 仅标注适用院校、档位和 Key，不指定学生、教师或账户，不能用于直接激活。'] },
-        { title: '四、费用与争议', paragraphs: ['当前 Key 机制为院校额度管理和权益交付功能，并非面向个人的在线支付、自动续费或代扣服务。如后续上线支付、发票、退款或自动续费功能，平台将在启用前另行发布适用的价格、支付、取消和退款规则。对 Key、订阅或额度存在疑问时，请及时向所属院校管理员核验，避免转让或公开传播 Key。'] },
+        ['档位与周期', '普通、Pro、Ultra、Max 每周期初始 AI 额度分别为 10、50、100 和 200 点。轻量和标准模式每次成功请求消耗 1 点，专家模式消耗 2 点。普通周期以注册日开始，高级周期以激活日开始。高级周期结束后回到普通订阅，以账户页显示的档位、余额和周期为准。'],
+        ['分配、签发和回收', '超级管理员向院校分配可签发库存，并可向目标院校的在任管理员发送定向提醒。授权院校管理员可在本校范围内签发和交付 Key，并接收系统通知及超级管理员提醒。Key 一次性有效并绑定院校，有效高级周期内不可叠加激活。未激活 Key 可依法依规回收并返还库存，已激活 Key 不可通过回收功能撤销。'],
+        ['交付方式', '签发时下载 Excel 订阅回执。在交付页导入后可校验 Key、为合格的指定账户直接激活，或导出指定对象或通用 PDF。直接激活会消耗 Key，导出 PDF 保留 Key 原状态。通用 PDF 未指定账户，仅可按院校规则交付使用。'],
+        ['费用和核查', '本版本通过院校分配权益，不在站内向个人提供在线支付、代扣或自动续费。请通过所在院校核对交付、额度及异常扣减，避免交易或公开转发 Key。'],
       ],
     },
     {
       id: 'content',
-      eyebrow: '生效日期：' + effective,
-      title: '知识产权与内容规范',
-      summary: '本规则明确平台内容、用户提交内容、AI 输出及学术诚信的使用边界。',
+      title: '著作权、源码与内容规范',
+      summary: '说明公开仓库的许可状态、平台与第三方作品的权利，以及师生内容的使用范围。',
       sections: [
-        { title: '一、平台权利', paragraphs: ['平台的名称、界面、软件、代码、数据库结构、文档、标识及其他受保护内容，其权利归平台或合法权利人所有。未经书面许可，不得复制、发行、出租、出售、反向工程、镜像、抓取或以其他方式不当利用平台内容与服务。'] },
-        { title: '二、用户内容', paragraphs: ['你对依法拥有权利的原创提交内容保留相应权利。为提供、维护和改进你主动使用的功能，你授予平台在必要范围内处理、存储、展示和传输该内容的有限、非排他授权。你应确保已取得上传、共享或处理该内容所需的权利、授权和同意，并自行承担违反前述承诺的责任。'] },
-        { title: '三、AI 输出与学术诚信', paragraphs: ['AI 输出不保证独创性、准确性、可用性、无侵权或适合特定用途。你不得将 AI 输出直接冒充为完全由本人独立完成的成果，或规避课程、论文、竞赛、研究与评审中的诚信要求。提交、发布或引用输出前，应进行人工审查、必要改写、事实核验、来源核验及 AI 使用披露。'] },
-        { title: '四、投诉处理', paragraphs: ['权利人认为平台内内容侵害其合法权益的，可向所属院校管理员或平台公示的合规渠道提交权利证明、涉嫌侵权内容定位、联系方式和处理请求。平台将按适用规则进行核验并采取必要措施。'] },
+        ['项目源码与著作权', '智导未来（AcademicNexus）的 GitHub 仓库公开可见，项目目前未采用开源许可证。著作权等依法享有的权利由相应权利人保留。查看和在 GitHub 上派生仓库适用 GitHub 服务条款。复制、修改、再分发、部署运营或商业使用，应依适用法律或取得相应权利人的授权。平台使用资格依据服务协议或院校授权确定。'],
+        ['第三方组件和项目标识', '第三方库、字体、图标及素材适用其各自的许可证、署名或其他权利声明。项目声明仅及于相应权利人对项目原创部分所享有的权利。使用项目名称、图形标识或院校标识仍应遵守相应权利和授权条件。'],
+        ['用户内容与资源', '你对有权提交的原创内容保留相应权利。上传资源或填写画像前应确认授权范围。你允许当前部署在提供你使用的功能所需范围内存储、处理并向可见范围内的用户展示这些内容。请勿将受限制的论文、课程材料或他人资料对外传播。'],
+        ['AI 输出与投诉', '使用生成内容前应核对出处、受保护表达、第三方权利及学术诚信要求。侵权投诉请提供内容位置、权利主张和必要证明，可通过所属院校的联络渠道提交。'],
+      ],
+      links: [
+        { label: '项目 GitHub 仓库', href: PROJECT_REPOSITORY },
+        { label: '《计算机软件保护条例》', href: copyrightRule },
       ],
     },
     {
       id: 'security',
-      eyebrow: '生效日期：' + effective,
       title: '信息安全与 Key 保护说明',
-      summary: '本说明覆盖账户、Access Key、订阅 Key、离线文件与安全事件的基本保护要求。',
+      summary: '保护登录凭证、激活回执、订阅回执和离线文件。',
       sections: [
-        { title: '一、账户保护', paragraphs: ['密码仅以安全哈希形式保存；登录令牌具有有限有效期，密码变更、管理员重置密码或账户停用会使旧会话失效。请使用独立且足够强度的密码，不与他人共享账户，不在公共设备保存登录状态，并及时退出不再使用的设备。'] },
-        { title: '二、Key 保护', paragraphs: ['Access Key 和订阅 Key 均使用受保护哈希和指纹完成验证，服务器不保存其明文。订阅 Key 签发后仅通过一次性 Excel 回执交付；离线交付页面在受限请求内存和当前浏览器页面中核验，完成导出、直接激活、刷新或离开页面后清除浏览器持有的 Key。请勿通过聊天、邮件群发、截图、公开文档或非受控群组传播 Key。'] },
-        { title: '三、PDF 与设备安全', paragraphs: ['订阅通知单 PDF 含可兑换 Key，应仅通过受控渠道发送给指定对象；通用 PDF 亦应按院校内部制度保存。下载后请妥善加密或受控保管本地文件，避免在共享电脑、公共云盘或无访问控制的群聊中存放。二维码和条码仅便于机器读取 Key，不构成额外认证。'] },
-        { title: '四、事件报告与处置', paragraphs: ['如发现账户异常、Key 泄露、误发 PDF、未授权访问、漏洞或疑似数据泄露，请立即修改密码、停止转发相关文件并联系所属院校管理员。院校管理员应限制受影响账户或 Key、保留必要线索，并依院校制度和适用规则启动后续处置。'] },
+        ['账户和安全记录', '密码以哈希校验。会话有有效期，密码变更、管理员重置或账户停用会使旧会话失效。平台使用角色与院校范围校验、请求限制和必要的管理员操作审计。请使用独立密码，共享设备使用后请退出。'],
+        ['激活回执和订阅 Key', 'Access Key 与订阅 Key 使用哈希和指纹校验。待激活账户丢失回执时，超级管理员可重新签发 Excel 回执，旧 Access Key 及未完成注册的旧会话随之失效。订阅 Key 的 Excel 回执在签发时提供，导入后用于校验和交付。'],
+        ['离线文件与事件报告', '回执及 PDF 可能含个人信息或可兑换凭证。只向授权接收者分发，在受控位置保存，按需要及时清理。发生遗失、误发或疑似未授权访问时，请及时联系所属院校管理员。院校和运营方应采取适用的核验、控制、通报和保护措施。'],
       ],
     },
     {
       id: 'minors',
-      eyebrow: '生效日期：' + effective,
       title: '未成年人保护声明',
-      summary: '平台面向院校授权账户；涉及未成年人时，应提供与年龄和场景相适应的额外保护。',
+      summary: '面向授权院校说明未成年用户的信息保护和监护人请求渠道。',
       sections: [
-        { title: '一、适用原则', paragraphs: ['平台不以未成年人为独立营销对象。若账户使用者为未成年人，应在监护人同意、院校管理制度和适用法律允许的范围内使用，并由院校、监护人和使用者共同注意网络安全、学术诚信和个人信息保护。'] },
-        { title: '二、信息与内容保护', paragraphs: ['管理员和使用者应遵循最小必要原则，避免将未成年人的敏感信息输入 AI 对话、资源或公开资料。不得利用平台向未成年人传播违法有害信息、实施诱导消费、欺凌、骚扰或其他损害身心健康的活动。'] },
-        { title: '三、监护与反馈', paragraphs: ['监护人或院校发现未成年人账户、内容或个人信息存在风险时，可通过所属院校管理员提出核验、限制、删除或其他合理请求。平台将结合身份核验、适用规则和安全需要处理。'] },
+        ['开通与监护', '院校向未成年人开通服务前，应按年龄、使用场景和适用法律建立保障措施。处理不满十四周岁未成年人的个人信息应取得其父母或者其他监护人的同意，并制定专门处理规则。相关告知与验证由实际部署方提供。'],
+        ['资料与 AI 使用', '院校人员、监护人和用户应限制未成年人资料的收集、展示和共享。请勿在资源或外部 AI 请求中提交不必要的身份、联系方式及其他敏感资料。发现伤害、骚扰或不当传播时，请通过所属院校的联络渠道报告。'],
+        ['监护人请求', '监护人可以向实际部署公示的责任主体或通过所属院校提出查阅、更正、删除、限制处理或撤回同意等请求。受理方会核验身份和监护关系，避免向无权人员披露资料。'],
       ],
+      links: [{ label: '《中华人民共和国个人信息保护法》', href: privacyLaw }],
     },
     {
       id: 'storage',
-      eyebrow: '生效日期：' + effective,
       title: '本地存储与登录状态说明',
-      summary: '本说明公开网站使用的浏览器本地存储、会话存储及其清除方式。',
+      summary: '列出浏览器保存的信息及清除方式。',
       sections: [
-        { title: '一、当前使用的本地数据', paragraphs: ['为维持登录和语言偏好，网站在浏览器本地存储中保存访问令牌、必要的账户展示信息和语言设置；注册流程的临时令牌保存在会话存储中。订阅 Key 不写入浏览器持久化存储，离线交付页面中的 Key 仅存在于当前页面的运行内存。'] },
-        { title: '二、你的控制', paragraphs: ['你可以通过退出登录清除平台写入的访问令牌、账户展示信息和注册临时信息；也可以在浏览器设置中清除本站点数据。清除本地数据会退出登录或中断未完成的注册，但不会自动删除服务器中依法保存的账户或业务信息。'] },
-        { title: '三、安全提醒', paragraphs: ['本地存储依赖你的浏览器和设备安全。请不要在不受信任或多人共用的设备保持登录，不要安装来源不明的浏览器扩展，并及时更新浏览器。平台如增加 Cookie、分析工具或其他存储技术，将在启用前更新本说明和隐私政策。'] },
+        ['本地和会话存储', '浏览器本地存储保存访问令牌、账户资料副本、语言和所选 AI 服务商偏好。包括账户资料中返回的本人联系字段。注册临时令牌和角色存放在会话存储中。离线交付页的订阅 Key 存放于该页面的运行内存，下载的 Excel 与 PDF 则由浏览器或设备保存。'],
+        ['清理和客户端控制', '退出登录清除应用保存的登录和临时注册状态。语言与 AI 服务商偏好可通过清除站点数据去除。设备上的下载文件、剪贴板和本机邮件草稿需要在对应设备或客户端管理。清除浏览器数据不会清除服务端业务记录。'],
       ],
     },
     {
       id: 'rights',
-      eyebrow: '生效日期：' + effective,
       title: '用户权利、投诉与争议处理规则',
-      summary: '本规则提供个人信息、服务、内容和安全问题的申诉、投诉与处理路径。',
+      summary: '提供个人信息、账户、内容、推荐结果、订阅与安全问题的处理渠道。',
       sections: [
-        { title: '一、请求渠道', paragraphs: ['你可通过所属院校管理员提交账户、个人信息、订阅、内容、AI 输出或安全问题的请求。请求应说明账户标识、事项、事实、希望的处理方式及必要证明；请勿在请求中重复提交密码、Access Key 或订阅 Key。院校管理员可在其授权范围内处理，必要时转交平台进行协同。'] },
-        { title: '二、处理原则', paragraphs: ['平台将按身份核验、授权范围、问题性质、适用法律和院校制度处理请求。对合理的查阅、更正、删除、撤回同意、解释、投诉和举报请求，平台将在合理期限内反馈处理状态；法律法规另有规定、涉及他人权益、公共安全、证据保全或无法验证身份的情形除外。'] },
-        { title: '三、争议解决', paragraphs: ['服务使用中发生争议时，建议先通过院校管理员和平台公示的联络渠道协商解决。无法协商的，任何一方可依法向有管辖权的人民法院或其他法定争议解决机构寻求救济。适用法律另有强制规定的，从其规定。'] },
+        ['提交请求', '可联系所属院校管理员，或直接使用实际部署公告中的个人信息保护和投诉联系方式。说明请求类别、账户标识、涉及内容及希望采取的措施。请通过受控渠道提供必要身份核验材料，勿发送密码和 Key。'],
+        ['可请求事项', '包括查阅、复制、更正、删除、撤回同意、注销、解释推荐结果、请求人工复核，或投诉侵权、异常扣减、未授权访问等问题。运营方在核验权限后按适用法律和公示的流程反馈。拒绝处理时，应在法律要求的范围内说明理由及救济渠道。'],
+        ['争议解决', '争议可先与所属院校和实际部署运营方沟通。你可依法向有管辖权的机关投诉、举报，或向有管辖权的人民法院及其他法定争议解决机构寻求救济。'],
       ],
     },
-  ],
-  'en-US': [
+  ]),
+  'en-US': documentSet('Updated', [
     {
       id: 'terms',
-      eyebrow: 'Effective: ' + effective,
       title: 'AcademicNexus Terms of Service',
-      summary: 'These terms set out the basic rights and duties for accounts, institution services, and platform use.',
+      summary: 'Applies to authorized institutions and their accounts, academic profiles, matching, resources, subscriptions, and AI assistance.',
       sections: [
-        { title: '1. Parties and scope', paragraphs: ['AcademicNexus provides academic portraits, student-mentor matching, resources, AI academic assistance, and subscription administration to students, mentors, and administrators authorized by partner institutions. These terms apply to the website, application pages, administration console, and related functions. Accounts are pre-registered by an institution and activated with an Access Key.'] },
-        { title: '2. Accounts and authorization', paragraphs: ['Keep account information accurate and protect passwords, Access Keys, and subscription Keys. Accounts are personal and may not be rented, lent, transferred, shared, or used to bypass verification, quotas, institution scope, or permission controls. Institution administrators may act only within their assigned institution; super administrators act only within their platform duties.'] },
-        { title: '3. Acceptable use', paragraphs: ['Comply with applicable law, institutional rules, network-order rules, and academic-integrity standards. Do not use the platform for unlawful conduct, fraud, harassment, discrimination, privacy invasion, intellectual-property infringement, system attacks, scraping, reverse engineering, unauthorized data access, or harmful content.'] },
-        { title: '4. Changes and responsibility', paragraphs: ['The platform may adjust, suspend, or discontinue functions for security, compliance, maintenance, institutional requirements, or upgrades, with notice where reasonably practicable. The platform is an academic-support tool and does not replace independent institutional, teacher, or professional judgment. You remain responsible for your inputs, conduct, and final use of outputs.'] },
-        { title: '5. Enforcement and changes', paragraphs: ['For abnormal, abusive, or non-compliant use, the platform may warn, restrict functions, suspend an account, end service, preserve necessary security records, and cooperate with lawful handling as appropriate. Material rule changes will carry an updated version and effective date.'] },
+        ['Service and operator', 'Each deployment operator provides AcademicNexus to partner institutions. Its service notice identifies the operator, the parties responsible for personal information, and their contact details. Self-hosted operators provide their own notices. Review and acknowledge these terms and the Privacy Policy separately during activation.'],
+        ['Accounts, workspaces, and access', 'Students and mentors activate a preregistered account using the Access Key on their receipt. Provide accurate information and protect credentials. An academic user with an administrator assignment uses one account to switch workspaces. Role and institution scope govern each action. Account sharing, impersonation, and bypassing controls or quotas are prohibited.'],
+        ['Institutional use', 'Follow applicable law, institutional policy, intellectual-property rights, and academic integrity rules. Unauthorized data collection, harassment, fraud, privacy violations, and disruption of the hosted service are prohibited. Mutual selection follows the recorded status and institutional rules. Matching scores, notifications, and AI suggestions support human judgment.'],
+        ['Changes and rights', 'The operator may make necessary adjustments, record security events, or restrict abusive accounts for maintenance, safety, or legal obligations and give notice through an appropriate channel. Material changes affecting users receive appropriate notice and, where required by law, renewed consent. Mandatory rights and liabilities follow applicable law.'],
       ],
     },
     {
       id: 'privacy',
-      eyebrow: 'Effective: ' + effective,
       title: 'Privacy Policy',
-      summary: 'This policy explains personal-information processing using purpose limitation, necessity, transparency, and security safeguards.',
+      summary: 'Describes account and contact data, processing by external services, and how to exercise personal-information rights.',
       sections: [
-        { title: '1. Controller, context, and basis', paragraphs: ['The platform processes information needed to provide its services within partner-institution authorization and applicable law. The platform and relevant institutions must each fulfill personal-information obligations within their legal duties and actual control. The deployment entity, privacy contact, and storage arrangement are those published in the institution launch notice and formal service page. Processing generally relies on service provision, legal obligations, security, or valid consent.'] },
-        { title: '2. Information and purposes', paragraphs: ['We process institution pre-registration identity and role information, login and security data, academic portraits, resource submissions, matching and selection records, AI conversations, subscription status, and necessary operational audit data. These support authentication, account and permission administration, matching, resources, AI assistance, subscription delivery, fraud prevention, and security maintenance.'], bullets: ['Do not enter unrelated identity-document numbers, financial or health information, passwords, Access Keys, subscription Keys, or another person’s data without authorization.', 'AI conversations are retained under the account and capped at 100 conversations per account.', 'We do not sell personal information or use it for unrelated marketing.'] },
-        { title: '3. Sharing, processors, and cross-border transfer', paragraphs: ['Information is disclosed only when necessary to authorized same-institution administrators, a matching party you choose, lawful authorities, or contracted service providers. AI requests may be processed by a configured model provider; remove unnecessary personal information before submission. Where sensitive-information processing, external provision, or cross-border transfer requires separate consent or another procedure, we will provide further notice and complete the applicable step.'] },
-        { title: '4. Retention and security', paragraphs: ['Information is kept only for the shortest period necessary for the stated purpose, institutional management, and legal obligations. Following deletion, account closure, expiry, or service termination, information is deleted, anonymized, or retained as legally required. We apply role and institution scopes, password hashing, session invalidation, Key fingerprints, access controls, and security auditing, but no internet transmission is absolutely secure.'] },
-        { title: '5. Your rights', paragraphs: ['You can view and correct certain account and portrait information, change a password, and manage subscriptions in the platform. For access, copy, correction, deletion, withdrawal of consent, account closure, an explanation of automated assistance, or a complaint, submit a request through your institution administrator. Requests are handled subject to identity verification, applicable law, institutional duties, and protection of others’ rights.'] },
+        ['Responsible parties and contact', 'The deployment notice identifies the personal-information handlers, contact details, hosting region, and the respective responsibilities of the institution and operator. You can also route a request through your institution administrator.'],
+        ['Data sources, purposes, and scope', 'Institutions provide names, academic IDs, institution and department details, and preregistered roles. Activation processes the account name, Access Key verification data, password hash, and the times you acknowledge the terms and Privacy Policy. Students and mentors provide an email address and WeChat ID during setup. Phone numbers are optional. As relevant to features you use, we process academic profiles, resources, mutual selection, subscriptions and credits, notifications, AI conversations, and necessary security records to operate those features, secure the service, and fulfill applicable obligations.'],
+        ['Service access and contact', 'Email, phone, and WeChat are hidden by default. You can share each field with users in your institution. Institution administrators can read shared contact fields within their assigned scope. Super administrators may view or correct contact data of ordinary student and mentor accounts for account administration. Administrator accounts have no contact editing feature and their details are hidden in the academic contact feature. Email opens in your local mail client. Copying writes to your device clipboard. The applicable client and service govern actual sending and its records.'],
+        ['External models, ranking, and disclosures', 'AI conversations may send your request, recent turns, and relevant profile, resource, or candidate context to the selected configured provider, such as DeepSeek, MiniMax, OpenAI, or Qwen. If you select a same-institution contact for drafting, the disclosed detail for that channel can be supplied for that request. When semantic ranking is enabled, selected academic text may be processed by SiliconFlow. Each deployment should disclose the actual recipients, purposes, methods, categories, retention arrangements, and regions. Separate consent, assessments, and cross-border procedures must be completed in advance where legally required.'],
+        ['Retention, protection, and your rights', 'The deployment retains account, resource, conversation, and business records according to processing purposes, its published retention periods, and legal obligations. You can update editable records and sharing settings and delete your own AI conversations. Deletion in the application does not directly erase third-party records retained under their rules or applicable law. For access, copying, correction, deletion, consent withdrawal, account closure, and complaints, see User Rights, Complaints, and Disputes.'],
       ],
+      links: [{ label: 'Personal Information Protection Law (Chinese)', href: privacyLaw }],
     },
     {
       id: 'ai',
-      eyebrow: 'Effective: ' + effective,
-      title: 'AI Service and Algorithmic Assistance Notice',
-      summary: 'This notice defines the AI assistant’s purpose, limits, input and output safeguards, transparency, and human-review rules.',
+      title: 'AI Services and Algorithmic Assistance',
+      summary: 'Explains model providers, matching, generated-content labels, and mutual-selection action cards.',
       sections: [
-        { title: '1. Purpose', paragraphs: ['The AI academic assistant can support learning pathways, research preparation, resource use, and student-mentor communication. Its output is probabilistic and may be incomplete, inaccurate, outdated, or unsuitable for a particular case. It is assistance only and is not a final decision or professional opinion for admission, academic assessment, discipline, medical, mental-health, legal, financial, or other high-impact matters.'] },
-        { title: '2. Inputs, outputs, and human review', paragraphs: ['Submit only information necessary for the task. Before using output, verify facts, citations, calculations, sources, copyright status, and suitability. For coursework, papers, projects, applications, assessment, or teaching, comply with institutional AI-use, authorship, citation, and disclosure rules and retain appropriate human judgment.'] },
-        { title: '3. Algorithmic assistance and choice', paragraphs: ['Portrait, matching, and recommendation features produce supportive rankings or suggestions from authorized information and do not replace human review. You may improve the basis by updating or correcting relevant information and, where available, choose not to rely on personalized suggestions or request an explanation, human review, or feedback through an institution administrator. The platform should not make a decision with a major impact on an individual solely through automated processing.'] },
-        { title: '4. Safety and feedback', paragraphs: ['Do not use AI to generate, distribute, or facilitate unlawful, hateful, discriminatory, fraudulent, false, infringing, privacy-invasive, or otherwise harmful content. Stop relying on an output that appears erroneous, biased, unsafe, or non-compliant, and report it to your institution administrator. The platform may take necessary safety measures for abnormal or non-compliant use.'] },
+        ['Model and input', 'Choose from the models configured for the deployment. The platform sends the conversation and context needed for the task. Keep passwords, Keys, unauthorized personal data, and unrelated sensitive information out of prompts. Contact drafting checks the selected channel against the recipient’s sharing settings. Review drafts before sending them in the relevant client.'],
+        ['Verification and labeling', 'Model replies in chat are marked “AI-generated”. They may contain errors in facts, reasoning, sources, or citations. When copying for external use, publishing, or submitting work, check facts, sources, personal data, and permissions. Keep or add appropriate AI labels and disclosures when applicable rules or institutional policies require them.'],
+        ['Ranking and mutual selection', 'Academic profile information informs relevance rankings. You can correct a profile, filter candidates, and decide whether to act. The platform creates action cards using institution, role, and workflow state. The action is submitted only when you press the button, and the server checks permission and quota again. Authorized people make decisions on admission, assessment, and other significant matters under applicable rules.'],
+        ['Feedback', 'Report concerns about recommendations, infringing content, bias, inaccurate output, or security through your institution administrator. Include the time and enough detail to locate the issue, with unrelated information removed.'],
       ],
+      links: [{ label: 'Measures for Labeling AI-Generated and Synthesized Content (Chinese)', href: aiLabelRule }],
     },
     {
       id: 'subscription',
-      eyebrow: 'Effective: ' + effective,
-      title: 'Subscription Service Rules',
-      summary: 'These rules explain basic and premium plans, entitlement cycles, institution Keys, and offline delivery.',
+      title: 'Subscription Rules',
+      summary: 'Explains plans, credit usage, institution inventory, Keys, and delivery.',
       sections: [
-        { title: '1. Tiers and cycles', paragraphs: ['The basic account allowance is 10 conversations per subscription cycle. Pro, Ultra, and Max allowances are 50, 100, and 200 conversations respectively. A basic cycle begins on the registration date. A premium cycle begins when a Key is redeemed. When a premium cycle ends without a new valid premium entitlement, the account returns to the basic tier and the basic cycle starts on the last premium cycle end date. The plan, balance, and dates shown on the Subscription page control.'] },
-        { title: '2. Key issue and limits', paragraphs: ['A super administrator allocates premium inventory to an institution, and an authorized institution administrator issues Keys. Each Key is one-time and institution-bound. It may only be redeemed by an eligible account in that institution. A user cannot upgrade, downgrade, or activate another premium plan during an active premium subscription. Activated Keys cannot be reclaimed; an unused Key may be reclaimed by an authorized administrator, after which it is permanently invalid and the institution inventory is restored.'] },
-        { title: '3. Offline delivery', paragraphs: ['To avoid retention of plain-text Keys, an issue receipt is downloaded as an Excel workbook only at issue time. An administrator can import that receipt into the offline-delivery page for live validation, directly activate an unsubscribed account, or export a named-user or general PDF notice. Direct activation consumes the Key immediately; PDF export does not change Key status. A general PDF states the institution, tier, and Key but does not name a student, mentor, or account, and cannot be used for direct activation.'] },
-        { title: '4. Charges and questions', paragraphs: ['The current Key mechanism is institution inventory and entitlement delivery, not an individual online-payment, recurring-billing, or automatic-debit service. If payment, invoice, refund, or recurring-billing functions are introduced, applicable price, payment, cancellation, and refund terms will be published before activation. Ask your institution administrator to verify any Key, entitlement, or allowance question promptly.'] },
+        ['Plans and cycles', 'Basic, Pro, Ultra, and Max begin each cycle with 10, 50, 100, and 200 AI credits respectively. Light and standard modes use one credit per successful request. Expert mode uses two. A basic cycle begins at registration and an advanced cycle at activation. An advanced subscription returns to basic after expiry. See your subscription page for the current plan, balance, and dates.'],
+        ['Allocation, issuance, and recall', 'Super administrators allocate inventory and can send reminders to a designated institution’s active administrators. Authorized institution administrators issue and deliver Keys within their scope and receive system notifications and reminders. A Key can be redeemed once by an eligible account at its assigned institution. Redemptions cannot be stacked within an active advanced cycle. An unused Key can be recalled and returned to inventory. The recall feature cannot revoke a redeemed Key.'],
+        ['Delivery', 'Download the Excel receipt when issuing Keys. Import it into delivery to validate Keys, directly activate an eligible named account, or export a named or general PDF notice. Direct activation consumes the Key. Exporting a PDF leaves the Key state as it was. A general PDF names no account and is handled under institution rules.'],
+        ['Payments and questions', 'This version distributes institution entitlements and offers no in-app consumer payment, direct debit, or auto-renewal. Ask your institution to check delivery, credits, or unexpected deductions. Keep Keys out of public channels and do not trade them.'],
       ],
     },
     {
       id: 'content',
-      eyebrow: 'Effective: ' + effective,
-      title: 'Intellectual Property and Content Rules',
-      summary: 'These rules set boundaries for platform materials, user content, AI outputs, and academic integrity.',
+      title: 'Copyright, Source Code, and Content Rules',
+      summary: 'Explains the repository’s licensing status, third-party rights, and the use of academic user content.',
       sections: [
-        { title: '1. Platform rights', paragraphs: ['The platform name, interface, software, code, database structure, documentation, identifiers, and other protected materials belong to the platform or the lawful rights holder. Without written permission, do not copy, distribute, rent, sell, reverse engineer, mirror, scrape, or otherwise improperly use platform materials or services.'] },
-        { title: '2. User content', paragraphs: ['You retain rights in original content that you lawfully own. To provide, maintain, and improve the function you choose to use, you grant the platform a limited, non-exclusive authorization to process, store, display, and transmit that content as necessary. You must have the rights, permissions, and consents needed to upload, share, or process the content.'] },
-        { title: '3. AI outputs and academic integrity', paragraphs: ['AI outputs are not guaranteed to be original, accurate, fit for purpose, non-infringing, or available for a particular use. Do not present AI output as entirely independent work where this would breach course, paper, competition, research, or assessment integrity rules. Conduct human review, verification, appropriate rewriting, source review, and AI-use disclosure before submission or publication.'] },
-        { title: '4. Rights complaints', paragraphs: ['A rights holder who believes content on the platform infringes lawful rights may submit proof of rights, a location of the disputed content, contact details, and a requested action to an institution administrator or the platform’s published compliance channel. The platform will verify and take necessary measures under applicable rules.'] },
+        ['Project source and copyright', 'The AcademicNexus GitHub repository is publicly visible. The project currently has no open-source license. Applicable rights are reserved by their respective holders. Viewing or forking on GitHub is subject to GitHub’s terms. Copying, modification, redistribution, deployment, and commercial use require a basis in applicable law or permission from the relevant rights holder. Service access is governed by these terms or institutional authorization.'],
+        ['Third-party components and identifiers', 'Third-party libraries, fonts, icons, and materials remain subject to their own licenses, attribution terms, and rights notices. The project’s statement concerns rights in its original work. The project name, logos, and institution identifiers remain subject to applicable rights and permissions.'],
+        ['User content and resources', 'You retain rights in original content you are entitled to submit. Make sure you have permission to provide profile information or upload resources. You allow the deployment to store, process, and display your content to authorized users as necessary for the functions you use. Respect the distribution restrictions on papers, course materials, and other people’s data.'],
+        ['AI output and complaints', 'Check sources, protected expression, third-party rights, and academic integrity rules before using generated output. Rights holders can provide the location of the content, the rights at issue, and necessary evidence through the institution’s contact channel.'],
+      ],
+      links: [
+        { label: 'Project repository on GitHub', href: PROJECT_REPOSITORY },
+        { label: 'Computer Software Protection Regulations (Chinese)', href: copyrightRule },
       ],
     },
     {
       id: 'security',
-      eyebrow: 'Effective: ' + effective,
-      title: 'Information Security and Key Protection Notice',
-      summary: 'This notice covers accounts, Access Keys, subscription Keys, offline files, and basic incident response.',
+      title: 'Security and Key Protection',
+      summary: 'Protects account credentials, activation receipts, subscription receipts, and offline files.',
       sections: [
-        { title: '1. Account protection', paragraphs: ['Passwords are stored only as secure hashes. Login tokens are time-limited, and password changes, administrator password resets, or account deactivation invalidate older sessions. Use a strong unique password, do not share accounts, avoid staying signed in on public devices, and sign out of devices you no longer use.'] },
-        { title: '2. Key protection', paragraphs: ['Access Keys and subscription Keys are verified using protected hashes and fingerprints; their plain text is not retained on the server. A subscription Key is delivered only in a one-time Excel receipt. The offline-delivery page validates the receipt in bounded request memory and the current browser page, then clears browser-held Key data after export, direct activation, refresh, or navigation. Never distribute a Key through public documents, screenshots, bulk email, or uncontrolled groups.'] },
-        { title: '3. PDF and device security', paragraphs: ['A subscription PDF includes a redeemable Key and should be sent only through a controlled channel to its intended person. General PDFs should also be retained according to institutional rules. Protect downloaded files locally and avoid shared devices, public cloud folders, and group chats without access control. QR and barcode representations only assist machine reading and do not add authentication.'] },
-        { title: '4. Incident response', paragraphs: ['If you suspect account misuse, Key exposure, a misdirected PDF, unauthorized access, a vulnerability, or a data incident, change the password, stop forwarding the relevant file, and contact your institution administrator immediately. Administrators should restrict affected accounts or Keys, preserve necessary evidence, and follow institutional and applicable incident procedures.'] },
+        ['Accounts and security records', 'Passwords are verified using hashes. Sessions expire. Password changes, administrator resets, and account deactivation invalidate prior sessions. The platform uses role and institution checks, request limits, and necessary administrator audit records. Use a unique password and sign out on shared devices.'],
+        ['Account receipts and subscription Keys', 'Access Keys and subscription Keys are verified using hashes and fingerprints. If an unsigned-up account loses its receipt, a super administrator can issue a fresh Excel receipt. Its previous Access Key and incomplete registration session are invalidated. The subscription receipt is available when the Key is issued and can later be imported for validation and delivery.'],
+        ['Offline files and incident reporting', 'Receipts and PDFs may contain personal information or redeemable credentials. Distribute them only to authorized recipients, hold them in controlled storage, and remove them when no longer needed. Report lost files, misdelivery, or suspected unauthorized access promptly. Institutions and operators should take applicable verification, containment, notification, and protective measures.'],
       ],
     },
     {
       id: 'minors',
-      eyebrow: 'Effective: ' + effective,
-      title: 'Minor Protection Statement',
-      summary: 'The platform is for institution-authorized accounts and applies additional safeguards where a user is a minor.',
+      title: 'Protection of Minors',
+      summary: 'Explains safeguards for minors and how guardians can raise requests.',
       sections: [
-        { title: '1. Principle', paragraphs: ['The platform is not marketed to minors as an independent consumer service. A minor may use it only with guardian consent, institutional rules, and applicable law. Institutions, guardians, and users should jointly protect online safety, academic integrity, and personal information.'] },
-        { title: '2. Information and content', paragraphs: ['Administrators and users should follow data minimization and avoid entering a minor’s sensitive information into AI conversations, resources, or public materials. The platform must not be used to deliver harmful content, induce spending, bully, harass, or otherwise harm a minor’s physical or mental wellbeing.'] },
-        { title: '3. Guardian and institution requests', paragraphs: ['A guardian or institution may ask an institution administrator to verify, restrict, delete, or otherwise address risk involving a minor’s account, content, or personal information. The request will be handled with identity verification, applicable rules, and security needs.'] },
+        ['Eligibility and guardians', 'Institutions should establish safeguards suited to age, the use case, and applicable law before granting access to minors. Processing personal information of children under fourteen requires consent from a parent or other guardian and specific processing rules. The deployment provides the applicable notices and verification process.'],
+        ['Personal information and AI', 'Institutions, guardians, and users should limit collection, display, and sharing of minors’ information. Keep unnecessary identity and contact details and other sensitive information out of resources and external AI requests. Report harmful content, harassment, and improper disclosure through your institution.'],
+        ['Guardian requests', 'Guardians may request access, correction, deletion, restriction, or consent withdrawal through the responsible party named in the deployment notice or the institution. The recipient verifies identity and guardianship before disclosing protected information.'],
       ],
+      links: [{ label: 'Personal Information Protection Law (Chinese)', href: privacyLaw }],
     },
     {
       id: 'storage',
-      eyebrow: 'Effective: ' + effective,
-      title: 'Local Storage and Login-State Notice',
-      summary: 'This notice discloses browser local storage, session storage, and how they are cleared.',
+      title: 'Local Storage and Sessions',
+      summary: 'Lists the information kept in your browser and how to clear it.',
       sections: [
-        { title: '1. Current local data', paragraphs: ['To maintain sign-in and language preference, the website stores an access token, necessary account-display information, and language settings in browser local storage. A registration token is stored in session storage for the registration flow. Subscription Keys are not written to persistent browser storage; Keys on the offline-delivery page exist only in the running memory of the current page.'] },
-        { title: '2. Your controls', paragraphs: ['Sign out to remove the platform’s access token, account-display data, and registration-session information. You can also clear this site’s data in browser settings. Clearing local data signs you out or interrupts unfinished registration, but does not automatically delete account or business information lawfully retained on the server.'] },
-        { title: '3. Security reminder', paragraphs: ['Local storage depends on your browser and device security. Do not remain signed in on untrusted or shared devices, avoid unknown browser extensions, and keep the browser up to date. If the platform introduces cookies, analytics, or other storage technologies, this notice and the Privacy Policy will be updated before use.'] },
+        ['Browser storage', 'Local storage retains the access token, a copy of account details including contact fields returned for your own account, your language, and your AI provider preference. Session storage holds the temporary registration token and role. The delivery page holds the subscription Key in page memory. Downloaded Excel and PDF files are stored by your browser or device.'],
+        ['Clearing data and client controls', 'Signing out removes login and temporary registration data saved by the app. Clear site data to remove language and provider preferences. Manage downloaded files, clipboard data, and local mail drafts in the relevant device or client. Clearing browser data does not clear server-side records.'],
       ],
     },
     {
       id: 'rights',
-      eyebrow: 'Effective: ' + effective,
-      title: 'User Rights, Complaints, and Dispute Handling',
-      summary: 'This rule provides a route for personal-information, service, content, AI-output, and security requests.',
+      title: 'User Rights, Complaints, and Disputes',
+      summary: 'Covers personal information, accounts, content, recommendations, subscriptions, and security.',
       sections: [
-        { title: '1. Request route', paragraphs: ['Submit account, personal-information, subscription, content, AI-output, or security requests through your institution administrator. State the account identifier, issue, facts, requested action, and necessary proof, but do not repeat a password, Access Key, or subscription Key. An institution administrator may handle matters within their authorization and escalate matters to the platform when needed.'] },
-        { title: '2. Handling principles', paragraphs: ['Requests are handled according to identity verification, authorization scope, issue type, applicable law, and institutional rules. The platform will provide a status response within a reasonable time for appropriate access, correction, deletion, consent withdrawal, explanation, complaint, or report requests, except where law provides otherwise or identity cannot be verified, another person’s rights would be harmed, or preservation or public-safety needs apply.'] },
-        { title: '3. Dispute resolution', paragraphs: ['For a dispute, first seek resolution through the institution administrator and the platform’s published contact route. If it cannot be resolved, either party may seek relief from a court or other lawful dispute-resolution body with jurisdiction, subject to mandatory applicable rules.'] },
+        ['Submit a request', 'Contact your institution administrator or use the privacy and complaint contacts listed in the deployment notice. Identify your account, the issue, any relevant content, and the outcome you seek. Provide necessary verification through an authorized channel and keep passwords and Keys out of requests.'],
+        ['What you can request', 'You can request access, copying, correction, deletion, consent withdrawal, account closure, explanations of recommendations, or human review. You can also report infringement, unusual deductions, or unauthorized access. The operator verifies authorization and responds under applicable law and its published procedure. When required by law, it will explain a denial and available remedies.'],
+        ['Disputes', 'You can first contact your institution and the deployment operator. You may also report issues to the competent authority or seek remedies from a court or other legally authorized dispute-resolution body with jurisdiction.'],
       ],
     },
-  ],
+  ]),
 }
 
-export function legalDocument(locale: 'zh-CN' | 'en-US', id?: string): LegalDocument | undefined {
+export function legalDocument(locale: keyof typeof legalDocuments, id?: string): LegalDocument | undefined {
   return legalDocuments[locale].find(item => item.id === id)
 }

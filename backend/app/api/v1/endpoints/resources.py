@@ -15,7 +15,7 @@ from app.models.resource import MentorResourceQuota, Resource
 from app.models.user import User
 from app.schemas.resource import (
     AdminResourceQuotaListResponse,
-    AdminResourceQuotaUpdateRequest,
+    AdminResourceQuotaUpdateRequest, AdminResourceQuotaBatchRequest,
     AdminResourceQuotaUserResponse,
     MentorResourceQuotaResponse,
     ResourceListResponse,
@@ -23,6 +23,7 @@ from app.schemas.resource import (
     ResourceType,
 )
 from app.services import resources as resource_service
+from app.services.workspace_events import record
 
 
 router = APIRouter(prefix="/resources", tags=["Learning resources / 学习资源"])
@@ -84,7 +85,7 @@ def list_resource_library(
     resource_type: ResourceType | None = Query(default=None),
     search: str = Query(default="", max_length=120),
 ) -> ResourceListResponse:
-    resources = resource_service.list_resources(db, tenant_id=current_user.tenant_id, resource_type=resource_type, search=search)
+    resources = resource_service.list_resources(db, tenant_id=current_user.tenant_id, viewer=current_user, resource_type=resource_type, search=search)
     owners = resource_service.owners_by_id(db, resources)
     return ResourceListResponse(items=[_serialize(resource, owners) for resource in resources], total=len(resources))
 
@@ -110,7 +111,7 @@ def recommend_resources(
 
 @router.get("/{resource_id}/download", summary="Download a resource file / 下载资源文件")
 def download_resource(resource_id: UUID, current_user: CurrentUser, db: DbSession) -> FileResponse:
-    resource = resource_service.get_resource(db, tenant_id=current_user.tenant_id, resource_id=resource_id)
+    resource = resource_service.get_resource(db, tenant_id=current_user.tenant_id, resource_id=resource_id, viewer=current_user)
     if resource is None or not resource.is_published or not resource.file_storage_key:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "resource_not_found"})
     try:
@@ -289,7 +290,30 @@ def update_resource_quota(
     if mentor is None or not any(role.code == "mentor" for role in mentor.roles):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "mentor_not_found"})
     try:
-        quota = resource_service.update_quota(db, mentor.id, payload.quota_mb)
+        quota = resource_service.update_quota(db, mentor.id, payload.quota_mb, commit=False)
+        record(db, admin.tenant_id, "resource_quota_changed", actor_id=admin.id,
+               recipient_id=mentor.id, workspace="mentor", quota_mb=payload.quota_mb)
+        db.commit()
     except resource_service.ResourceError as error:
         raise _resource_error(error) from error
     return _quota_response(quota)
+
+
+@admin_router.post("/batch")
+def update_resource_quotas(payload: AdminResourceQuotaBatchRequest, db: DbSession,
+                           admin: User = Depends(require_super_admin)):
+    ids = sorted(set(payload.user_ids))
+    mentors = db.scalars(select(User).where(User.tenant_id == admin.tenant_id,
+        User.id.in_(ids), User.roles.any(code="mentor")).order_by(User.id)).all()
+    if len(mentors) != len(ids):
+        raise HTTPException(404, detail={"code": "mentor_not_found"})
+    try:
+        for mentor in mentors:
+            resource_service.update_quota(db, mentor.id, payload.quota_mb, commit=False)
+            record(db, admin.tenant_id, "resource_quota_changed", actor_id=admin.id,
+                   recipient_id=mentor.id, workspace="mentor", quota_mb=payload.quota_mb)
+    except resource_service.ResourceError as error:
+        db.rollback()
+        raise _resource_error(error) from error
+    db.commit()
+    return {"updated": len(mentors)}

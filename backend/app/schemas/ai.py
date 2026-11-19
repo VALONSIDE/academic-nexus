@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -31,7 +31,12 @@ class AiConversationRenameRequest(BaseModel):
 
 
 class AiMessageCreateRequest(BaseModel):
+    selection_target_id: UUID | None = None
+    request_id: UUID = Field(default_factory=uuid4)
+    contact_user_id: UUID | None = None
+    contact_channel: Literal["email", "sms", "wechat"] | None = None
     content: str = Field(min_length=1, max_length=6000)
+    provider: Literal["deepseek", "minimax", "openai", "qwen"] = "deepseek"
     model_tier: AiModelTier = "standard"
     response_mode: AiResponseMode = "standard"
 
@@ -44,7 +49,19 @@ class AiMessageCreateRequest(BaseModel):
         return normalized
 
 
+class AiActionCard(BaseModel):
+    kind: Literal["mutual_selection"]
+    action: Literal["apply", "invite", "accept_invitation", "confirm_application"]
+    target_id: UUID
+    target_name: str
+    expected_status: str | None = None
+    state: Literal["ready", "completed"]
+    selection_id: UUID | None = None
+    result_status: str | None = None
+
+
 class AiMessageResponse(BaseModel):
+    action_card: AiActionCard | None = None
     id: UUID
     role: Literal["user", "assistant"]
     content: str
